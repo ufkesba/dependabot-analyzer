@@ -1,0 +1,50 @@
+# Dependabot Analyzer Configuration
+
+# GitHub settings
+github:
+  token: "${GITHUB_TOKEN}"  # Set via environment variable
+  repo: "owner/repo-name"    # Format: "owner/repository"
+
+# LLM Provider settings
+llm:
+  # Primary model for deep analysis (using Gemini Flash for now)
+  primary:
+    provider: "google"
+    model: "gemini-flash-latest"  # Fast and free via AI Studio
+    max_tokens: 8192
+    temperature: 0.1
+
+  # Optional: Upgrade to Claude later for better reasoning
+  # primary:
+  #   provider: "anthropic"
+  #   model: "claude-3-5-sonnet-20241022"
+  #   max_tokens: 4096
+  #   temperature: 0.1
+
+# API Keys (use environment variables)
+api_keys:
+  google: "${GOOGLE_API_KEY}"  # From AI Studio
+  # anthropic: "${ANTHROPIC_API_KEY}"  # Optional
+  # openai: "${OPENAI_API_KEY}"  # Optional
+
+# Analysis settings
+analysis:
+  # Severity levels to analyze (skip low/info alerts)
+  min_severity: "medium"  # Options: critical, high, medium, low, info
+
+  # Max alerts to process in one run
+  max_alerts: 10
+
+  # Code context size (lines around usage)
+  context_lines: 50
+
+# Output settings
+output:
+  # Where to save reports
+  reports_dir: "./reports"
+
+  # Post results back to GitHub as comments
+  post_to_github: false
+
+  # Generate test cases
+  generate_tests: true

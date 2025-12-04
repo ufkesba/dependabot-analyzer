@@ -1,0 +1,29 @@
+# GitHub API
+PyGithub==2.1.1
+
+# LLM Providers
+google-generativeai==0.8.3
+# anthropic==0.39.0  # Optional
+# openai==1.55.3  # Optional
+
+# Data validation and config
+pydantic==2.10.3
+pydantic-settings==2.6.1
+pyyaml==6.0.2
+
+# Code analysis
+tree-sitter==0.23.2
+tree-sitter-python==0.23.6
+tree-sitter-javascript==0.23.1
+
+# CLI and output
+rich==13.9.4
+typer==0.9.0
+click==8.1.7
+
+# Async support
+aiohttp==3.12.14
+asyncio==3.4.3
+
+# Utilities
+python-dotenv==1.0.1
