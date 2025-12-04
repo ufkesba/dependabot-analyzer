@@ -180,5 +180,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-# Local logs
+# Local logs / vulnerability reports
 logs/
+reports/
