@@ -3,6 +3,7 @@ Code analyzer that searches for actual vulnerable function usage patterns.
 Goes beyond simple package imports to find real exploitable code paths.
 """
 import re
+import httpx
 from typing import List, Dict, Optional, Tuple
 from pydantic import BaseModel
 from rich.console import Console
@@ -20,10 +21,12 @@ class VulnerabilityPattern(BaseModel):
     """Pattern to match vulnerable code usage"""
     package: str
     vulnerability_id: str
-    vulnerable_functions: List[str]  # Functions/methods that are vulnerable
-    patterns: List[str]  # Regex patterns to match vulnerable usage
+    vulnerable_functions: List[str]  # EXPOSED functions to search for in application code
+    patterns: List[str]  # Regex patterns to match EXPOSED function usage
     description: str
-    indicators: List[str]  # Additional indicators of vulnerability
+    indicators: List[str]  # Additional indicators of vulnerability (e.g., "user input", "untrusted data")
+    internal_function: Optional[str] = None  # Name of internal vulnerable function if mentioned in alert
+    triggering_note: Optional[str] = None  # Explanation of how exposed APIs trigger internal function
 
 
 class CodeMatch(BaseModel):
@@ -141,11 +144,190 @@ class CodeAnalyzer:
         self.llm = llm_client  # Optional LLM for dynamic pattern extraction
         self.verbose = verbose
 
+    async def fetch_package_documentation(self, package_name: str) -> Optional[str]:
+        """
+        Fetch documentation for a package from multiple sources.
+
+        Args:
+            package_name: Name of the package
+
+        Returns:
+            Documentation text if found, None otherwise
+        """
+        if self.verbose:
+            console.print(f"[cyan]Fetching documentation for {package_name}...[/cyan]")
+
+        # Try npm first (most JavaScript packages)
+        npm_docs = await self._fetch_npm_docs(package_name)
+        if npm_docs:
+            if self.verbose:
+                console.print(f"[green]Found npm documentation for {package_name}[/green]")
+            return npm_docs
+
+        # Try PyPI for Python packages
+        pypi_docs = await self._fetch_pypi_docs(package_name)
+        if pypi_docs:
+            if self.verbose:
+                console.print(f"[green]Found PyPI documentation for {package_name}[/green]")
+            return pypi_docs
+
+        # Try GitHub README
+        github_docs = await self._fetch_github_readme(package_name)
+        if github_docs:
+            if self.verbose:
+                console.print(f"[green]Found GitHub README for {package_name}[/green]")
+            return github_docs
+
+        if self.verbose:
+            console.print(f"[yellow]No documentation found for {package_name}[/yellow]")
+        return None
+
+    async def _fetch_npm_docs(self, package_name: str) -> Optional[str]:
+        """Fetch package documentation from npm registry"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"https://registry.npmjs.org/{package_name}")
+                if response.status_code == 200:
+                    data = response.json()
+                    readme = data.get("readme", "")
+                    latest_version = data.get("dist-tags", {}).get("latest", "")
+
+                    # Get latest version info for API details
+                    version_info = data.get("versions", {}).get(latest_version, {})
+
+                    docs = f"# {package_name} Documentation\n\n"
+                    if readme:
+                        docs += readme[:5000]  # Limit readme size
+
+                    # Add main exports info if available
+                    if "main" in version_info:
+                        docs += f"\n\nMain entry: {version_info['main']}\n"
+
+                    return docs
+        except Exception as e:
+            if self.verbose:
+                console.print(f"[dim]npm fetch failed: {str(e)[:100]}[/dim]")
+        return None
+
+    async def _fetch_pypi_docs(self, package_name: str) -> Optional[str]:
+        """Fetch package documentation from PyPI"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"https://pypi.org/pypi/{package_name}/json")
+                if response.status_code == 200:
+                    data = response.json()
+                    info = data.get("info", {})
+                    description = info.get("description", "") or info.get("summary", "")
+
+                    docs = f"# {package_name} Documentation\n\n"
+                    if description:
+                        docs += description[:5000]  # Limit size
+
+                    return docs
+        except Exception as e:
+            if self.verbose:
+                console.print(f"[dim]PyPI fetch failed: {str(e)[:100]}[/dim]")
+        return None
+
+    async def _fetch_github_readme(self, package_name: str) -> Optional[str]:
+        """Fetch README from GitHub for the package"""
+        try:
+            # Try to find the package's GitHub repo
+            # Common patterns: org/package-name, package-name/package-name
+            potential_repos = [
+                f"{package_name}/{package_name}",
+                f"npm/{package_name}",
+                f"{package_name}/node-{package_name}",
+            ]
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                for repo_path in potential_repos:
+                    try:
+                        response = await client.get(
+                            f"https://raw.githubusercontent.com/{repo_path}/main/README.md"
+                        )
+                        if response.status_code == 200:
+                            return f"# {package_name} README\n\n{response.text[:5000]}"
+
+                        # Try master branch if main doesn't exist
+                        response = await client.get(
+                            f"https://raw.githubusercontent.com/{repo_path}/master/README.md"
+                        )
+                        if response.status_code == 200:
+                            return f"# {package_name} README\n\n{response.text[:5000]}"
+                    except:
+                        continue
+        except Exception as e:
+            if self.verbose:
+                console.print(f"[dim]GitHub fetch failed: {str(e)[:100]}[/dim]")
+        return None
+
+    async def extract_api_info(self, package_name: str, documentation: str) -> Optional[Dict[str, any]]:
+        """
+        Use LLM to extract public API information from documentation.
+
+        Args:
+            package_name: Name of the package
+            documentation: Documentation text
+
+        Returns:
+            Dictionary with exposed_apis and internal_notes
+        """
+        if not self.llm:
+            return None
+
+        prompt = f"""Analyze this package documentation and extract information about the PUBLIC API surface.
+
+Package: {package_name}
+
+Documentation:
+{documentation}
+
+Your task:
+1. Identify the EXPOSED/PUBLIC functions, methods, and classes that application developers use
+2. Distinguish these from internal/private implementation details
+3. Note any parsing, processing, or data handling functions
+
+Focus on:
+- Top-level exports and public APIs
+- Constructor functions and main entry points
+- Commonly used methods mentioned in examples
+- Functions that process user input or external data
+
+Respond in JSON format:
+{{
+  "exposed_apis": ["list of public function/method names"],
+  "parsing_functions": ["functions that parse/process data"],
+  "internal_notes": "brief notes about internal vs public APIs"
+}}
+"""
+
+        try:
+            response_format = {
+                "exposed_apis": ["array of strings"],
+                "parsing_functions": ["array of strings"],
+                "internal_notes": "string"
+            }
+
+            result = await self.llm.ask_structured(
+                prompt=prompt,
+                response_format=response_format,
+                system_prompt="You are a technical documentation analyst extracting API information.",
+                max_tokens=1500
+            )
+
+            return result
+        except Exception as e:
+            if self.verbose:
+                console.print(f"[yellow]API extraction from docs failed: {str(e)[:100]}[/yellow]")
+            return None
+
     async def extract_vulnerable_functions(
         self,
         package_name: str,
         vulnerability_description: str,
-        vulnerability_summary: str
+        vulnerability_summary: str,
+        api_info: Optional[Dict[str, any]] = None
     ) -> Optional[VulnerabilityPattern]:
         """
         Use LLM to extract vulnerable functions from alert description.
@@ -154,6 +336,7 @@ class CodeAnalyzer:
             package_name: Name of the vulnerable package
             vulnerability_description: Full vulnerability description
             vulnerability_summary: Short vulnerability summary
+            api_info: Optional API information extracted from package documentation
 
         Returns:
             VulnerabilityPattern if functions can be extracted, None otherwise
@@ -161,62 +344,134 @@ class CodeAnalyzer:
         if not self.llm:
             return None
 
-        prompt = f"""Analyze this security vulnerability alert and extract the vulnerable functions.
+        # Build API context section if available
+        api_context = ""
+        if api_info:
+            api_context = f"""
+## Package API Information (from documentation)
+
+**Exposed/Public APIs:**
+{', '.join(api_info.get('exposed_apis', [])) if api_info.get('exposed_apis') else 'Not available'}
+
+**Parsing/Processing Functions:**
+{', '.join(api_info.get('parsing_functions', [])) if api_info.get('parsing_functions') else 'Not available'}
+
+**Notes:**
+{api_info.get('internal_notes', 'No additional notes')}
+
+Use this information to help distinguish between internal functions and exposed APIs.
+"""
+
+        prompt = f"""Analyze this security vulnerability alert and extract information about vulnerable and exposed functions.
 
 Package: {package_name}
 Summary: {vulnerability_summary}
 Description: {vulnerability_description}
+{api_context}
 
-Your task is to identify:
-1. Which specific functions/methods are DIRECTLY EXPOSED and CALLABLE by application code (if any are mentioned)
-2. What regex patterns would match usage of these vulnerable functions
-3. What indicators suggest the vulnerability is being exploited (e.g., "user input", "req.body")
+Your task is to identify WHICH FUNCTIONS applications should search for in their code.
 
-CRITICAL DISTINCTIONS:
-- **Internal library functions** (e.g., internal parsers, recursive helpers, private methods): These are NOT directly called by application code. They are triggered indirectly when using exposed APIs. Return EMPTY arrays for these.
-- **Exposed API functions** (e.g., HTTP client methods, template engines, data parsers): These ARE directly called by applications. Include these if they trigger the vulnerability.
-- If the vulnerability is in an internal function that's only triggered when specific exposed APIs are used with untrusted input, identify the EXPOSED APIs, not the internal functions.
-- If no specific EXPOSED functions are mentioned, or if the vulnerability requires indirect triggering, return empty arrays.
+## CRITICAL: Internal vs Exposed Functions
 
-Examples:
+Many vulnerabilities occur in **internal library functions** that applications never call directly.
+Instead, they are triggered **indirectly** through **exposed API functions**.
 
-Example 1 (Specific functions):
-Alert: "Command Injection in lodash via _.template() when user-controlled input is passed"
+**Your job**: Identify the EXPOSED API functions that applications actually call, NOT internal implementation details.
+
+### How to Identify:
+
+**Internal Vulnerable Function** (DO NOT return these):
+- Usually mentioned in technical details (e.g., "the vulnerability is in the internal X parser")
+- Implementation details, helper functions, recursive parsers
+- Private methods, internal utilities
+- Applications don't import or call these directly
+
+**Exposed API Functions** (DO return these):
+- Public APIs that applications import and call
+- Entry points to the library's functionality
+- Based on the vulnerability description, which exposed APIs would trigger the vulnerable code path?
+- Consider: What operations would cause the internal vulnerable function to execute?
+
+### Decision Logic:
+
+1. Read the vulnerability description carefully
+2. Identify if a specific internal function is mentioned as vulnerable
+3. If YES: Reason about which PUBLIC/EXPOSED APIs would call that internal function
+   - Think: "What would an application developer call to trigger this?"
+   - Look for clues in the description about operations (parsing, decoding, processing, etc.)
+4. If the description mentions exposed functions directly, return those
+5. If unclear or too general, return empty arrays
+
+### Response Format Examples:
+
+**Example 1: Internal Parser Function**
+Alert: "Unbounded recursion in internal parser causes DoS when processing deeply nested structures"
+
+Reasoning: The vulnerability is in an internal parser. What exposed APIs trigger parsing?
+- Look at the description for clues about what operation triggers it
+- Consider: certificate parsing, data decoding, template processing, etc.
+
 Output: {{
-  "vulnerable_functions": ["_.template", "lodash.template"],
-  "patterns": ["_\\\\.template\\\\(", "lodash\\\\.template\\\\("],
-  "indicators": ["user input", "req.body", "req.query", "req.params"]
+  "vulnerable_functions": ["<public APIs that trigger parsing based on the description>"],
+  "patterns": ["<regex for those public APIs>"],
+  "indicators": ["untrusted input", "user-provided data", "external source"],
+  "description": "DoS via unbounded recursion in parsing",
+  "internal_function": "<name of internal function if mentioned>",
+  "triggering_note": "Applications trigger this by using <type of operation> functions with untrusted input"
 }}
 
-Example 2 (No specific functions):
-Alert: "Denial of Service in axios versions below 1.2.3 due to improper header parsing"
+**Example 2: Directly Exposed Function**
+Alert: "Command Injection via template compilation function when user input is passed"
+
+Reasoning: The vulnerability IS in the exposed API itself
+
+Output: {{
+  "vulnerable_functions": ["<template function names from description>"],
+  "patterns": ["<regex for template functions>"],
+  "indicators": ["user input", "req.body", "external template"],
+  "description": "Command injection via template compilation",
+  "internal_function": null,
+  "triggering_note": null
+}}
+
+**Example 3: General Package Behavior**
+Alert: "Denial of Service due to improper header parsing in HTTP client"
+
+Reasoning: No specific function mentioned, general behavior
+
 Output: {{
   "vulnerable_functions": [],
   "patterns": [],
-  "indicators": ["http headers", "user-controlled headers"]
+  "indicators": ["http headers", "user-controlled headers"],
+  "description": "DoS via malformed HTTP headers",
+  "internal_function": null,
+  "triggering_note": "Affects general request handling, not a specific function"
 }}
 
-Example 3 (Multiple functions):
-Alert: "Prototype Pollution in lodash via _.merge, _.mergeWith, and _.defaultsDeep"
-Output: {{
-  "vulnerable_functions": ["_.merge", "_.mergeWith", "_.defaultsDeep", "lodash.merge", "lodash.mergeWith", "lodash.defaultsDeep"],
-  "patterns": ["_\\\\.merge\\\\(", "_\\\\.mergeWith\\\\(", "_\\\\.defaultsDeep\\\\(", "lodash\\\\.merge\\\\(", "lodash\\\\.mergeWith\\\\(", "lodash\\\\.defaultsDeep\\\\("],
-  "indicators": ["req.body", "req.query", "JSON.parse", "user input"]
-}}
+## Key Principles:
+
+1. **Think like an application developer**: What functions would they actually call?
+2. **Extract from description**: Use clues about operations (parsing, encoding, templating, etc.)
+3. **Don't guess**: If the description doesn't provide enough information, return empty arrays
+4. **Prefer exposed over internal**: Always return the public-facing APIs
 
 Respond in JSON format with these fields:
-- vulnerable_functions: Array of function names (empty if no specific functions mentioned)
-- patterns: Array of regex patterns to search for (empty if no specific functions)
-- indicators: Array of strings that indicate exploitation (can be populated even if no specific functions)
+- vulnerable_functions: Array of EXPOSED function names to search for (empty if unclear)
+- patterns: Array of regex patterns matching the EXPOSED functions
+- indicators: Array of strings indicating exploitation context
 - description: Brief description of the vulnerability
+- internal_function: String naming the internal vulnerable function if explicitly mentioned, null otherwise
+- triggering_note: String explaining the relationship between exposed APIs and internal function, null if not applicable
 """
 
         try:
             response_format = {
-                "vulnerable_functions": ["array of strings"],
+                "vulnerable_functions": ["array of strings - EXPOSED APIs to search for"],
                 "patterns": ["array of regex strings"],
                 "indicators": ["array of strings"],
-                "description": "string"
+                "description": "string",
+                "internal_function": "string or null - the actual vulnerable internal function",
+                "triggering_note": "string or null - explanation of how exposed APIs trigger it"
             }
 
             result = await self.llm.ask_structured(
@@ -239,7 +494,9 @@ Respond in JSON format with these fields:
                 vulnerable_functions=result["vulnerable_functions"],
                 patterns=result["patterns"],
                 description=result["description"],
-                indicators=result.get("indicators", [])
+                indicators=result.get("indicators", []),
+                internal_function=result.get("internal_function"),
+                triggering_note=result.get("triggering_note")
             )
 
             if self.verbose:
@@ -282,10 +539,18 @@ Respond in JSON format with these fields:
         if not pattern and self.llm and vulnerability_description:
             if self.verbose:
                 console.print(f"[cyan]No hardcoded pattern found, using LLM to extract vulnerable functions...[/cyan]")
+
+            # Fetch package documentation to help identify exposed vs internal functions
+            api_info = None
+            docs = await self.fetch_package_documentation(package_name)
+            if docs:
+                api_info = await self.extract_api_info(package_name, docs)
+
             pattern = await self.extract_vulnerable_functions(
                 package_name,
                 vulnerability_description,
-                vulnerability_summary or ""
+                vulnerability_summary or "",
+                api_info=api_info
             )
 
         # If still no pattern, fall back to generic search

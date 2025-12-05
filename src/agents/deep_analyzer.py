@@ -199,11 +199,37 @@ Focus on practical exploitability, not theoretical risk."""
 Perform a thorough analysis to determine:
 
 1. **Exploitability**: Can this vulnerability actually be exploited in this codebase?
-   - CRITICAL: If the vulnerability is in an INTERNAL library function (e.g., internal parsers, recursive helpers, private methods), check if the application uses EXPOSED APIs that would trigger it with untrusted input.
-   - Is the vulnerable code path actually used through the application's usage of the library?
-   - Can attacker-controlled input reach the vulnerable code (either directly or through exposed APIs)?
-   - Are there any mitigating factors in how the package is used?
-   - Remember: Just importing the package is NOT exploitable. The application must use it in a way that triggers the vulnerability.
+
+   **CRITICAL - Understanding Triggering Mechanisms:**
+
+   a) **Identify the vulnerability type:**
+      - Is the vulnerable code in an INTERNAL function (parser, helper, processor)?
+      - OR is it in an EXPOSED API function that applications call directly?
+
+   b) **For INTERNAL vulnerable functions:**
+      - These are NOT called directly by applications
+      - They are triggered indirectly through exposed APIs
+      - Questions to ask:
+        * What exposed APIs would trigger this internal code?
+        * Does the application use those exposed APIs?
+        * Does the application pass untrusted input to those APIs?
+      - Example flow: App calls exposed API → Exposed API processes input → Internal vulnerable code executes
+
+   c) **For EXPOSED vulnerable functions:**
+      - Check if the application directly calls this function
+      - Can attacker-controlled input reach this function?
+
+   d) **Key Analysis Questions:**
+      - Is the vulnerable code path executed (either directly OR indirectly)?
+      - What is the chain: User Input → Application Code → Library Function → Vulnerable Code?
+      - Can an attacker control the input that reaches the vulnerable code?
+      - Are there mitigating factors (validation, sanitization, sandboxing)?
+
+   e) **Remember**:
+      - Package import alone = NOT exploitable
+      - Must trace: Does user input → flow through → vulnerable code path?
+      - For internal vulnerabilities, look for exposed API usage patterns
+      - Consider both direct calls and indirect triggering
 
 2. **Impact**: If exploitable, what's the real-world impact?
    - Data exposure?

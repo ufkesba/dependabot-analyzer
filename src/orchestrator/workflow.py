@@ -306,7 +306,7 @@ class DependabotAnalyzer:
         console.print(f"\n[bold]Starting deep analysis of {len(alerts)} alerts...[/bold]\n")
 
         for i, alert in enumerate(alerts, 1):
-            console.print(f"\n[bold]Alert {i}/{len(alerts)}[/bold]")
+            console.print(f"\n[bold]Alert {i}/{len(alerts)} - {alert.url}[/bold]")
 
             # Create analysis state for this alert
             analysis_state = AnalysisState(alert=alert)
@@ -318,6 +318,8 @@ class DependabotAnalyzer:
             self.analysis_states.append(analysis_state)
             if analysis_state.final_report:
                 self.reports.append(analysis_state.final_report)
+                # Save report immediately after processing
+                self.save_single_report(analysis_state.final_report)
             if analysis_state.final_fp_check:
                 self.false_positive_checks.append(analysis_state.final_fp_check)
 
@@ -362,6 +364,8 @@ class DependabotAnalyzer:
         if analysis_state.final_report:
             self.reports.append(analysis_state.final_report)
             report = analysis_state.final_report
+            # Save report immediately after processing
+            self.save_single_report(report)
         else:
             console.print("[red]Analysis failed - no report generated[/red]")
             return
@@ -466,6 +470,20 @@ class DependabotAnalyzer:
                 console.print(f"  Confidence: {report.confidence}")
                 console.print(f"  Reasoning: {report.reasoning}")
                 console.print(f"  Recommended Action: {report.recommended_action}")
+
+    def save_single_report(self, report: AnalysisReport, output_dir: str = "./reports"):
+        """Save a single analysis report to JSON file"""
+        import json
+        from pathlib import Path
+
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        filename = f"{output_dir}/alert_{report.alert_number}_{report.package}.json"
+        with open(filename, 'w') as f:
+            json.dump(report.model_dump(), f, indent=2)
+
+        if self.verbose:
+            console.print(f"[dim]→ Saved report to {filename}[/dim]")
 
     def save_reports(self, output_dir: str = "./reports"):
         """Save analysis reports to JSON files"""
