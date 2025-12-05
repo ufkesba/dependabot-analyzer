@@ -37,7 +37,8 @@ class DeepAnalyzer:
         self,
         alert: DependabotAlert,
         code_context: str,
-        code_matches: Optional[List[CodeMatch]] = None
+        code_matches: Optional[List[CodeMatch]] = None,
+        previous_attempts: Optional[str] = None
     ) -> AnalysisReport:
         """
         Perform comprehensive analysis of a security alert.
@@ -46,6 +47,7 @@ class DeepAnalyzer:
             alert: The Dependabot alert to analyze
             code_context: Relevant code showing how the dependency is used
             code_matches: Specific vulnerable code patterns found (optional)
+            previous_attempts: Context from previous failed attempts (optional)
 
         Returns:
             AnalysisReport with exploitability assessment and recommendations
@@ -53,7 +55,7 @@ class DeepAnalyzer:
         console.print(f"\n[cyan]Analyzing alert #{alert.number}: {alert.package}[/cyan]")
 
         # Build analysis prompt
-        prompt = self._build_analysis_prompt(alert, code_context, code_matches)
+        prompt = self._build_analysis_prompt(alert, code_context, code_matches, previous_attempts)
 
         # Define expected response structure
         response_format = {
@@ -143,7 +145,8 @@ Focus on practical exploitability, not theoretical risk."""
         self,
         alert: DependabotAlert,
         code_context: str,
-        code_matches: Optional[List[CodeMatch]] = None
+        code_matches: Optional[List[CodeMatch]] = None,
+        previous_attempts: Optional[str] = None
     ) -> str:
         """Build the detailed analysis prompt"""
 
@@ -159,6 +162,11 @@ Focus on practical exploitability, not theoretical risk."""
                 matches_section += f"**Context**:\n```\n{match.context}\n```\n\n"
         else:
             matches_section = "\n## Vulnerable Code Patterns\n\nNo specific vulnerable function usage patterns were found. This suggests the package may be imported but the vulnerable functions are not being used.\n\n"
+
+        # Add previous attempts context if provided
+        previous_context = ""
+        if previous_attempts:
+            previous_context = f"\n## Previous Analysis Attempts\n\n{previous_attempts}\n\nPlease take this context into account and provide a more accurate analysis.\n\n"
 
         return f"""Analyze this Dependabot security alert for actual exploitability:
 
@@ -180,6 +188,8 @@ Focus on practical exploitability, not theoretical risk."""
 
 ## General Code Context
 {code_context}
+
+{previous_context}
 
 ## Analysis Required
 

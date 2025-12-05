@@ -9,6 +9,7 @@ from ..agents.deep_analyzer import DeepAnalyzer, AnalysisReport
 from ..agents.code_analyzer import CodeAnalyzer, CodeMatch
 from ..agents.false_positive_checker import FalsePositiveChecker, FalsePositiveCheck
 from ..llm.client import LLMClient
+from .state import AnalysisState
 
 console = Console()
 
@@ -42,12 +43,158 @@ class DependabotAnalyzer:
         self.alert_fetcher = AlertFetcher(repo, github_token)
         deep_analyzer_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="deep_analyzer")
         false_positive_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="false_positive_checker")
+        code_analyzer_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="code_analyzer")
         self.analyzer = DeepAnalyzer(deep_analyzer_llm)
-        self.code_analyzer = CodeAnalyzer(self.alert_fetcher.repo)
+        self.code_analyzer = CodeAnalyzer(self.alert_fetcher.repo, llm_client=code_analyzer_llm)
         self.false_positive_checker = FalsePositiveChecker(false_positive_llm)
 
         self.reports: List[AnalysisReport] = []
         self.false_positive_checks: List[FalsePositiveCheck] = []
+        self.analysis_states: List[AnalysisState] = []  # Track state for each alert
+
+    async def _process_alert_with_state(self, state: AnalysisState) -> AnalysisState:
+        """
+        Process a single alert with state tracking.
+        This enables retry logic and context accumulation.
+
+        Args:
+            state: The AnalysisState for this alert
+
+        Returns:
+            Updated AnalysisState with results
+        """
+        alert = state.alert
+
+        # Phase 1: Code Analysis
+        state.current_phase = "code_analysis"
+        state.increment_attempts("code_analyzer")
+
+        try:
+            if self.verbose:
+                console.print("[dim]→ Agent: code_analyzer[/dim]")
+            console.print("[cyan]Searching for vulnerable code patterns...[/cyan]")
+
+            code_matches = await self.code_analyzer.find_vulnerable_usage(
+                package_name=alert.package,
+                vulnerability_id=alert.vulnerability_id,
+                max_files=50,
+                vulnerability_description=alert.description,
+                vulnerability_summary=alert.summary
+            )
+            state.code_matches = code_matches
+            state.add_execution("code_analyzer", success=True, matches_found=len(code_matches))
+
+        except Exception as e:
+            state.add_execution("code_analyzer", success=False, error_message=str(e))
+            console.print(f"[yellow]Warning: Code analysis failed: {str(e)[:100]}[/yellow]")
+            # Continue with empty matches
+            state.code_matches = []
+
+        # Phase 2: Get Code Context
+        try:
+            if self.verbose:
+                console.print("[dim]→ Agent: alert_fetcher[/dim]")
+            state.code_context = self.alert_fetcher.get_code_context(alert)
+            state.add_execution("alert_fetcher", success=True)
+        except Exception as e:
+            state.add_execution("alert_fetcher", success=False, error_message=str(e))
+            console.print(f"[yellow]Warning: Code context fetch failed: {str(e)[:100]}[/yellow]")
+            state.code_context = f"Package: {alert.package} (context unavailable)"
+
+        # Phase 3: Deep Analysis (with retry on low confidence)
+        state.current_phase = "deep_analysis"
+
+        report = None
+        while state.should_retry("deep_analyzer"):
+            state.increment_attempts("deep_analyzer")
+            attempt_num = state.deep_analyzer_attempts
+
+            try:
+                if self.verbose:
+                    console.print(f"[dim]→ Agent: deep_analyzer (LLM) [attempt {attempt_num}][/dim]")
+
+                # Pass accumulated context from previous attempts
+                previous_context = state.accumulated_context if state.accumulated_context else None
+
+                report = await self.analyzer.analyze(
+                    alert,
+                    state.code_context,
+                    state.code_matches,
+                    previous_attempts=previous_context
+                )
+                state.reports.append(report)
+                state.final_report = report
+                state.add_execution("deep_analyzer", success=True, confidence=report.confidence, attempt=attempt_num)
+
+                # Check if we should retry based on confidence
+                if report.confidence == "low" and state.should_retry("deep_analyzer"):
+                    console.print(f"[yellow]Low confidence analysis (attempt {attempt_num}), retrying with additional context...[/yellow]")
+
+                    # Add context for next attempt
+                    context_msg = f"Previous attempt {attempt_num} returned low confidence.\nReasoning: {report.reasoning}\n"
+                    state.add_context(context_msg)
+                    continue
+                elif report.confidence == "medium" and attempt_num == 1 and state.should_retry("deep_analyzer"):
+                    console.print(f"[yellow]Medium confidence analysis, retrying once for higher confidence...[/yellow]")
+
+                    context_msg = f"Previous attempt returned medium confidence.\nReasoning: {report.reasoning}\n"
+                    state.add_context(context_msg)
+                    continue
+                else:
+                    # Acceptable confidence or max retries reached
+                    break
+
+            except Exception as e:
+                state.add_execution("deep_analyzer", success=False, error_message=str(e), attempt=attempt_num)
+                console.print(f"[yellow]Error during deep analysis (attempt {attempt_num}): {str(e)[:200]}[/yellow]")
+
+                if state.should_retry("deep_analyzer"):
+                    error_context = f"Previous attempt {attempt_num} failed with error: {str(e)[:500]}\n"
+                    state.add_context(error_context)
+                    continue
+                else:
+                    console.print(f"[red]Max retries reached for deep analysis[/red]")
+                    state.current_phase = "failed"
+                    return state
+
+        if not report:
+            console.print(f"[red]Deep analysis failed after {state.deep_analyzer_attempts} attempts[/red]")
+            state.current_phase = "failed"
+            return state
+
+        # Phase 4: False Positive Check (only for exploitable alerts)
+        if state.final_report and state.final_report.is_exploitable:
+            state.current_phase = "fp_check"
+            state.increment_attempts("false_positive_checker")
+
+            try:
+                if self.verbose:
+                    console.print("[dim]→ Agent: false_positive_checker (LLM)[/dim]")
+                console.print("[cyan]Running false positive check...[/cyan]")
+
+                fp_check = await self.false_positive_checker.check(
+                    initial_report=state.final_report,
+                    code_matches=state.code_matches,
+                    vulnerability_details=f"{alert.description}\n\nAffected versions: {alert.affected_versions}"
+                )
+
+                state.false_positive_checks.append(fp_check)
+                state.final_fp_check = fp_check
+                state.add_execution("false_positive_checker", success=True, is_fp=fp_check.is_false_positive)
+
+                # Apply corrections if needed
+                if fp_check.is_false_positive:
+                    state.final_report = await self.false_positive_checker.validate_and_correct(
+                        state.final_report,
+                        fp_check
+                    )
+
+            except Exception as e:
+                state.add_execution("false_positive_checker", success=False, error_message=str(e))
+                console.print(f"[yellow]Warning: False positive check failed: {str(e)[:200]}[/yellow]")
+
+        state.current_phase = "completed"
+        return state
 
     async def run(
         self,
@@ -85,52 +232,24 @@ class DependabotAnalyzer:
         # Display alerts table
         self._display_alerts_table(alerts)
 
-        # Step 2: Analyze each alert
+        # Step 2: Analyze each alert with state tracking
         console.print(f"\n[bold]Starting deep analysis of {len(alerts)} alerts...[/bold]\n")
 
         for i, alert in enumerate(alerts, 1):
             console.print(f"\n[bold]Alert {i}/{len(alerts)}[/bold]")
 
-            # Step 2a: Search for vulnerable code patterns
-            if self.verbose:
-                console.print("[dim]→ Agent: code_analyzer[/dim]")
-            console.print("[cyan]Searching for vulnerable code patterns...[/cyan]")
-            code_matches = self.code_analyzer.find_vulnerable_usage(
-                package_name=alert.package,
-                vulnerability_id=alert.vulnerability_id,
-                max_files=50
-            )
+            # Create analysis state for this alert
+            analysis_state = AnalysisState(alert=alert)
 
-            # Step 2b: Get general code context
-            if self.verbose:
-                console.print("[dim]→ Agent: alert_fetcher[/dim]")
-            code_context = self.alert_fetcher.get_code_context(alert)
+            # Process alert with state management
+            analysis_state = await self._process_alert_with_state(analysis_state)
 
-            # Step 2c: Deep analysis with code matches
-            if self.verbose:
-                console.print("[dim]→ Agent: deep_analyzer (LLM)[/dim]")
-            report = await self.analyzer.analyze(alert, code_context, code_matches)
-
-            # Step 2d: False positive check (only for exploitable alerts)
-            fp_check = None
-            if report.is_exploitable:
-                if self.verbose:
-                    console.print("[dim]→ Agent: false_positive_checker (LLM)[/dim]")
-                console.print("[cyan]Running false positive check...[/cyan]")
-                console.print(f"Running false positive check for alert #{alert.number}")
-                fp_check = await self.false_positive_checker.check(
-                    initial_report=report,
-                    code_matches=code_matches,
-                    vulnerability_details=f"{alert.description}\n\nAffected versions: {alert.affected_versions}"
-                )
-
-                # Step 2e: Apply corrections if needed
-                if fp_check.is_false_positive:
-                    report = await self.false_positive_checker.validate_and_correct(report, fp_check)
-
-                self.false_positive_checks.append(fp_check)
-
-            self.reports.append(report)
+            # Save state and results
+            self.analysis_states.append(analysis_state)
+            if analysis_state.final_report:
+                self.reports.append(analysis_state.final_report)
+            if analysis_state.final_fp_check:
+                self.false_positive_checks.append(analysis_state.final_fp_check)
 
         # Step 3: Display summary
         self._display_summary()
@@ -170,48 +289,26 @@ class DependabotAnalyzer:
         console.print(f"CVE: {target_alert.cve_id or 'N/A'}")
         console.print(f"Summary: {target_alert.summary}\n")
 
-        # Search for vulnerable code patterns
-        if self.verbose:
-            console.print("[dim]→ Agent: code_analyzer[/dim]")
-        console.print("[cyan]Searching for vulnerable code patterns...[/cyan]")
-        code_matches = self.code_analyzer.find_vulnerable_usage(
-            package_name=target_alert.package,
-            vulnerability_id=target_alert.vulnerability_id,
-            max_files=50
-        )
+        # Create analysis state for this alert
+        analysis_state = AnalysisState(alert=target_alert)
 
-        # Get general code context
-        if self.verbose:
-            console.print("[dim]→ Agent: alert_fetcher[/dim]")
-        console.print("[cyan]Analyzing general code usage...[/cyan]")
-        code_context = self.alert_fetcher.get_code_context(target_alert)
+        # Process alert with state management
+        analysis_state = await self._process_alert_with_state(analysis_state)
 
-        # Deep analysis
-        if self.verbose:
-            console.print("[dim]→ Agent: deep_analyzer (LLM)[/dim]")
-        console.print("[cyan]Running deep AI analysis...[/cyan]\n")
-        report = await self.analyzer.analyze(target_alert, code_context, code_matches)
+        # Save state and results
+        self.analysis_states.append(analysis_state)
+        if analysis_state.final_report:
+            self.reports.append(analysis_state.final_report)
+            report = analysis_state.final_report
+        else:
+            console.print("[red]Analysis failed - no report generated[/red]")
+            return
 
-        # False positive check (only for exploitable alerts)
-        fp_check = None
-        if report.is_exploitable:
-            if self.verbose:
-                console.print("[dim]→ Agent: false_positive_checker (LLM)[/dim]")
-            console.print("[cyan]Running false positive check...[/cyan]")
-            console.print(f"Running false positive check for alert #{target_alert.number}")
-            fp_check = await self.false_positive_checker.check(
-                initial_report=report,
-                code_matches=code_matches,
-                vulnerability_details=f"{target_alert.description}\n\nAffected versions: {target_alert.affected_versions}"
-            )
-
-            # Apply corrections if needed
-            if fp_check.is_false_positive:
-                report = await self.false_positive_checker.validate_and_correct(report, fp_check)
-
-            self.false_positive_checks.append(fp_check)
-
-        self.reports.append(report)
+        if analysis_state.final_fp_check:
+            self.false_positive_checks.append(analysis_state.final_fp_check)
+            fp_check = analysis_state.final_fp_check
+        else:
+            fp_check = None
 
         # Display detailed result
         console.print("\n" + "="*80)

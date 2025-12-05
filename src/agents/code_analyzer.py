@@ -10,6 +10,11 @@ from github import Repository
 
 console = Console()
 
+# Import only for type hints, actual LLM client passed in
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..llm.client import LLMClient
+
 
 class VulnerabilityPattern(BaseModel):
     """Pattern to match vulnerable code usage"""
@@ -73,17 +78,181 @@ class CodeAnalyzer:
                     "merge objects",
                 ]
             )
+        },
+        "lodash": {
+            "GHSA-35jh-r3h4-6jhm": VulnerabilityPattern(
+                package="lodash",
+                vulnerability_id="GHSA-35jh-r3h4-6jhm",
+                vulnerable_functions=["_.template", "lodash.template"],
+                patterns=[
+                    r"_\.template\(",
+                    r"lodash\.template\(",
+                ],
+                description="Command Injection via template function",
+                indicators=[
+                    "user input",
+                    "req.body",
+                    "req.query",
+                    "req.params",
+                    "untrusted data"
+                ]
+            ),
+            "GHSA-29mw-wpgm-hmr9": VulnerabilityPattern(
+                package="lodash",
+                vulnerability_id="GHSA-29mw-wpgm-hmr9",
+                vulnerable_functions=["_.merge", "_.mergeWith", "_.defaultsDeep"],
+                patterns=[
+                    r"_\.merge\(",
+                    r"_\.mergeWith\(",
+                    r"_\.defaultsDeep\(",
+                    r"lodash\.merge\(",
+                    r"lodash\.mergeWith\(",
+                    r"lodash\.defaultsDeep\(",
+                ],
+                description="Prototype Pollution via merge functions",
+                indicators=[
+                    "req.body",
+                    "req.query",
+                    "user input",
+                    "JSON.parse",
+                    "untrusted object"
+                ]
+            ),
+            "GHSA-jf85-cpcp-j695": VulnerabilityPattern(
+                package="lodash",
+                vulnerability_id="GHSA-jf85-cpcp-j695",
+                vulnerable_functions=["_.zipObjectDeep"],
+                patterns=[
+                    r"_\.zipObjectDeep\(",
+                    r"lodash\.zipObjectDeep\(",
+                ],
+                description="Prototype Pollution via zipObjectDeep",
+                indicators=[
+                    "user input",
+                    "req.body",
+                    "untrusted array"
+                ]
+            )
         }
     }
 
-    def __init__(self, repo: Repository.Repository):
+    def __init__(self, repo: Repository.Repository, llm_client: Optional['LLMClient'] = None):
         self.repo = repo
+        self.llm = llm_client  # Optional LLM for dynamic pattern extraction
 
-    def find_vulnerable_usage(
+    async def extract_vulnerable_functions(
+        self,
+        package_name: str,
+        vulnerability_description: str,
+        vulnerability_summary: str
+    ) -> Optional[VulnerabilityPattern]:
+        """
+        Use LLM to extract vulnerable functions from alert description.
+
+        Args:
+            package_name: Name of the vulnerable package
+            vulnerability_description: Full vulnerability description
+            vulnerability_summary: Short vulnerability summary
+
+        Returns:
+            VulnerabilityPattern if functions can be extracted, None otherwise
+        """
+        if not self.llm:
+            return None
+
+        prompt = f"""Analyze this security vulnerability alert and extract the vulnerable functions.
+
+Package: {package_name}
+Summary: {vulnerability_summary}
+Description: {vulnerability_description}
+
+Your task is to identify:
+1. Which specific functions/methods in this package are vulnerable (if any are mentioned)
+2. What regex patterns would match usage of these vulnerable functions
+3. What indicators suggest the vulnerability is being exploited (e.g., "user input", "req.body")
+
+IMPORTANT:
+- Some vulnerabilities affect ALL uses of a package, not specific functions. If no specific functions are mentioned, return empty arrays.
+- Only include functions that are explicitly mentioned as vulnerable in the description.
+- If the vulnerability is version-based only (e.g., "all versions below X.Y.Z are vulnerable") with no specific function mentioned, return empty arrays.
+
+Examples:
+
+Example 1 (Specific functions):
+Alert: "Command Injection in lodash via _.template() when user-controlled input is passed"
+Output: {{
+  "vulnerable_functions": ["_.template", "lodash.template"],
+  "patterns": ["_\\\\.template\\\\(", "lodash\\\\.template\\\\("],
+  "indicators": ["user input", "req.body", "req.query", "req.params"]
+}}
+
+Example 2 (No specific functions):
+Alert: "Denial of Service in axios versions below 1.2.3 due to improper header parsing"
+Output: {{
+  "vulnerable_functions": [],
+  "patterns": [],
+  "indicators": ["http headers", "user-controlled headers"]
+}}
+
+Example 3 (Multiple functions):
+Alert: "Prototype Pollution in lodash via _.merge, _.mergeWith, and _.defaultsDeep"
+Output: {{
+  "vulnerable_functions": ["_.merge", "_.mergeWith", "_.defaultsDeep", "lodash.merge", "lodash.mergeWith", "lodash.defaultsDeep"],
+  "patterns": ["_\\\\.merge\\\\(", "_\\\\.mergeWith\\\\(", "_\\\\.defaultsDeep\\\\(", "lodash\\\\.merge\\\\(", "lodash\\\\.mergeWith\\\\(", "lodash\\\\.defaultsDeep\\\\("],
+  "indicators": ["req.body", "req.query", "JSON.parse", "user input"]
+}}
+
+Respond in JSON format with these fields:
+- vulnerable_functions: Array of function names (empty if no specific functions mentioned)
+- patterns: Array of regex patterns to search for (empty if no specific functions)
+- indicators: Array of strings that indicate exploitation (can be populated even if no specific functions)
+- description: Brief description of the vulnerability
+"""
+
+        try:
+            response_format = {
+                "vulnerable_functions": ["array of strings"],
+                "patterns": ["array of regex strings"],
+                "indicators": ["array of strings"],
+                "description": "string"
+            }
+
+            result = await self.llm.ask_structured(
+                prompt=prompt,
+                response_format=response_format,
+                system_prompt="You are a security expert analyzing vulnerability descriptions to extract vulnerable function names and search patterns.",
+                max_tokens=2000
+            )
+
+            # If no vulnerable functions found, return None
+            if not result.get("vulnerable_functions") or len(result["vulnerable_functions"]) == 0:
+                console.print(f"[yellow]LLM found no specific vulnerable functions for {package_name}[/yellow]")
+                return None
+
+            # Create VulnerabilityPattern from LLM response
+            pattern = VulnerabilityPattern(
+                package=package_name,
+                vulnerability_id="llm_extracted",
+                vulnerable_functions=result["vulnerable_functions"],
+                patterns=result["patterns"],
+                description=result["description"],
+                indicators=result.get("indicators", [])
+            )
+
+            console.print(f"[green]LLM extracted {len(pattern.vulnerable_functions)} vulnerable functions[/green]")
+            return pattern
+
+        except Exception as e:
+            console.print(f"[yellow]LLM extraction failed: {str(e)[:200]}[/yellow]")
+            return None
+
+    async def find_vulnerable_usage(
         self,
         package_name: str,
         vulnerability_id: str,
-        max_files: int = 50
+        max_files: int = 50,
+        vulnerability_description: Optional[str] = None,
+        vulnerability_summary: Optional[str] = None
     ) -> List[CodeMatch]:
         """
         Search codebase for actual vulnerable function usage.
@@ -92,16 +261,29 @@ class CodeAnalyzer:
             package_name: Name of the vulnerable package
             vulnerability_id: The vulnerability ID (GHSA, CVE, etc.)
             max_files: Maximum number of files to scan
+            vulnerability_description: Full vulnerability description (for LLM extraction)
+            vulnerability_summary: Short vulnerability summary (for LLM extraction)
 
         Returns:
             List of CodeMatch objects showing vulnerable usage
         """
         console.print(f"[cyan]Searching for vulnerable usage of {package_name}...[/cyan]")
 
-        # Get vulnerability pattern if we have it
+        # Get vulnerability pattern if we have it (fast path)
         pattern = self._get_vulnerability_pattern(package_name, vulnerability_id)
+
+        # If no hardcoded pattern, try LLM extraction
+        if not pattern and self.llm and vulnerability_description:
+            console.print(f"[cyan]No hardcoded pattern found, using LLM to extract vulnerable functions...[/cyan]")
+            pattern = await self.extract_vulnerable_functions(
+                package_name,
+                vulnerability_description,
+                vulnerability_summary or ""
+            )
+
+        # If still no pattern, fall back to generic search
         if not pattern:
-            console.print(f"[yellow]No specific pattern for {vulnerability_id}, using generic search[/yellow]")
+            console.print(f"[yellow]No specific vulnerable functions identified, using generic search[/yellow]")
             return self._generic_package_search(package_name, max_files)
 
         matches = []
