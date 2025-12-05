@@ -27,8 +27,9 @@ class FalsePositiveChecker:
     Agent that critically examines vulnerability findings to identify false positives.
     """
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, verbose: bool = False):
         self.llm = llm_client
+        self.verbose = verbose
 
     async def check(
         self,
@@ -47,7 +48,8 @@ class FalsePositiveChecker:
         Returns:
             FalsePositiveCheck with validation results
         """
-        console.print(f"[cyan]Running false positive check for alert #{initial_report.alert_number}[/cyan]")
+        if self.verbose:
+            console.print(f"[cyan]Running false positive check for alert #{initial_report.alert_number}[/cyan]")
 
         prompt = self._build_check_prompt(initial_report, code_matches, vulnerability_details)
 

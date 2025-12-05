@@ -8,6 +8,7 @@ from ..agents.alert_fetcher import AlertFetcher, DependabotAlert
 from ..agents.deep_analyzer import DeepAnalyzer, AnalysisReport
 from ..agents.code_analyzer import CodeAnalyzer, CodeMatch
 from ..agents.false_positive_checker import FalsePositiveChecker, FalsePositiveCheck
+from ..agents.reflection_agent import ReflectionAgent, ReflectionResult
 from ..llm.client import LLMClient
 from .state import AnalysisState
 
@@ -44,9 +45,11 @@ class DependabotAnalyzer:
         deep_analyzer_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="deep_analyzer")
         false_positive_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="false_positive_checker")
         code_analyzer_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="code_analyzer")
-        self.analyzer = DeepAnalyzer(deep_analyzer_llm)
-        self.code_analyzer = CodeAnalyzer(self.alert_fetcher.repo, llm_client=code_analyzer_llm)
-        self.false_positive_checker = FalsePositiveChecker(false_positive_llm)
+        reflection_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="reflection_agent")
+        self.analyzer = DeepAnalyzer(deep_analyzer_llm, verbose=verbose)
+        self.code_analyzer = CodeAnalyzer(self.alert_fetcher.repo, llm_client=code_analyzer_llm, verbose=verbose)
+        self.false_positive_checker = FalsePositiveChecker(false_positive_llm, verbose=verbose)
+        self.reflection_agent = ReflectionAgent(reflection_llm, verbose=verbose)
 
         self.reports: List[AnalysisReport] = []
         self.false_positive_checks: List[FalsePositiveCheck] = []
@@ -69,10 +72,10 @@ class DependabotAnalyzer:
         state.current_phase = "code_analysis"
         state.increment_attempts("code_analyzer")
 
+        if self.verbose:
+            console.print("\n[bold cyan]━━━ Phase 1: Code Pattern Search ━━━[/bold cyan]")
+
         try:
-            if self.verbose:
-                console.print("[dim]→ Agent: code_analyzer[/dim]")
-            console.print("[cyan]Searching for vulnerable code patterns...[/cyan]")
 
             code_matches = await self.code_analyzer.find_vulnerable_usage(
                 package_name=alert.package,
@@ -86,32 +89,40 @@ class DependabotAnalyzer:
 
         except Exception as e:
             state.add_execution("code_analyzer", success=False, error_message=str(e))
-            console.print(f"[yellow]Warning: Code analysis failed: {str(e)[:100]}[/yellow]")
+            if self.verbose:
+                console.print(f"[yellow]Warning: Code analysis failed: {str(e)[:100]}[/yellow]")
             # Continue with empty matches
             state.code_matches = []
 
         # Phase 2: Get Code Context
         try:
             if self.verbose:
-                console.print("[dim]→ Agent: alert_fetcher[/dim]")
+                console.print("[dim]→ Fetching code context (manifest files, dependency info)[/dim]")
             state.code_context = self.alert_fetcher.get_code_context(alert)
             state.add_execution("alert_fetcher", success=True)
         except Exception as e:
             state.add_execution("alert_fetcher", success=False, error_message=str(e))
-            console.print(f"[yellow]Warning: Code context fetch failed: {str(e)[:100]}[/yellow]")
+            if self.verbose:
+                console.print(f"[yellow]Warning: Code context fetch failed: {str(e)[:100]}[/yellow]")
             state.code_context = f"Package: {alert.package} (context unavailable)"
 
-        # Phase 3: Deep Analysis (with retry on low confidence)
+        # Phase 3: Deep Analysis with Reflection-Based Refinement
         state.current_phase = "deep_analysis"
 
+        if self.verbose:
+            console.print("\n[bold cyan]━━━ Phase 2: Deep Analysis ━━━[/bold cyan]")
+
         report = None
-        while state.should_retry("deep_analyzer"):
+        refinement_iteration = 0
+
+        while True:
+            # Step 3a: Run Deep Analysis
             state.increment_attempts("deep_analyzer")
             attempt_num = state.deep_analyzer_attempts
 
             try:
-                if self.verbose:
-                    console.print(f"[dim]→ Agent: deep_analyzer (LLM) [attempt {attempt_num}][/dim]")
+                if self.verbose and attempt_num > 1:
+                    console.print(f"[dim]→ Deep analysis attempt {attempt_num}[/dim]")
 
                 # Pass accumulated context from previous attempts
                 previous_context = state.accumulated_context if state.accumulated_context else None
@@ -126,36 +137,94 @@ class DependabotAnalyzer:
                 state.final_report = report
                 state.add_execution("deep_analyzer", success=True, confidence=report.confidence, attempt=attempt_num)
 
-                # Check if we should retry based on confidence
-                if report.confidence == "low" and state.should_retry("deep_analyzer"):
-                    console.print(f"[yellow]Low confidence analysis (attempt {attempt_num}), retrying with additional context...[/yellow]")
-
-                    # Add context for next attempt
-                    context_msg = f"Previous attempt {attempt_num} returned low confidence.\nReasoning: {report.reasoning}\n"
-                    state.add_context(context_msg)
-                    continue
-                elif report.confidence == "medium" and attempt_num == 1 and state.should_retry("deep_analyzer"):
-                    console.print(f"[yellow]Medium confidence analysis, retrying once for higher confidence...[/yellow]")
-
-                    context_msg = f"Previous attempt returned medium confidence.\nReasoning: {report.reasoning}\n"
-                    state.add_context(context_msg)
-                    continue
-                else:
-                    # Acceptable confidence or max retries reached
-                    break
-
             except Exception as e:
                 state.add_execution("deep_analyzer", success=False, error_message=str(e), attempt=attempt_num)
-                console.print(f"[yellow]Error during deep analysis (attempt {attempt_num}): {str(e)[:200]}[/yellow]")
+                if self.verbose:
+                    console.print(f"[yellow]Error during deep analysis (attempt {attempt_num}): {str(e)[:200]}[/yellow]")
 
                 if state.should_retry("deep_analyzer"):
                     error_context = f"Previous attempt {attempt_num} failed with error: {str(e)[:500]}\n"
                     state.add_context(error_context)
                     continue
                 else:
-                    console.print(f"[red]Max retries reached for deep analysis[/red]")
+                    if self.verbose:
+                        console.print(f"[red]Max retries reached for deep analysis[/red]")
                     state.current_phase = "failed"
                     return state
+
+            # Step 3b: Reflection Phase (if we have a report and can still refine)
+            if report and state.should_retry("reflection_agent") and refinement_iteration < state.max_refinement_iterations:
+                state.current_phase = "reflection"
+                state.increment_attempts("reflection_agent")
+                refinement_iteration += 1
+
+                if self.verbose:
+                    console.print(f"\n[bold magenta]━━━ Reflection Check (iteration {refinement_iteration}) ━━━[/bold magenta]")
+
+                try:
+
+                    reflection = await self.reflection_agent.reflect(
+                        alert=alert,
+                        current_report=report,
+                        code_matches=state.code_matches,
+                        analysis_history=state.reports,
+                        attempt_count=attempt_num
+                    )
+                    state.reflection_results.append(reflection)
+                    state.add_execution("reflection_agent", success=True, needs_refinement=reflection.needs_refinement, iteration=refinement_iteration)
+
+                    # Act on reflection result
+                    if not reflection.needs_refinement or reflection.command.action == "accept_result":
+                        if self.verbose:
+                            console.print("[green]✓ Reflection agent accepted analysis result[/green]")
+                        break
+                    elif reflection.command.action == "escalate_manual":
+                        if self.verbose:
+                            console.print("[yellow]⚠ Reflection agent recommends manual review[/yellow]")
+                        state.add_context(f"Reflection iteration {refinement_iteration}: {reflection.reasoning}")
+                        break
+                    elif reflection.command.action == "retry_analysis":
+                        if self.verbose:
+                            console.print(f"[yellow]🔄 Reflection suggests retry: {reflection.command.reason}[/yellow]")
+                        # Add reflection insights to context
+                        context_msg = f"Reflection iteration {refinement_iteration}:\n"
+                        context_msg += f"Assessment: {reflection.confidence_assessment}\n"
+                        context_msg += f"Patterns detected: {', '.join(reflection.detected_patterns)}\n"
+                        context_msg += f"Reason for retry: {reflection.command.reason}\n"
+                        if reflection.command.confidence_boost:
+                            context_msg += f"Suggestions: {reflection.command.confidence_boost}\n"
+                        if reflection.suggested_focus_areas:
+                            context_msg += f"Focus on: {', '.join(reflection.suggested_focus_areas)}\n"
+                        state.add_context(context_msg)
+
+                        # Check if we can retry deep analysis
+                        if state.should_retry("deep_analyzer"):
+                            state.current_phase = "deep_analysis"
+                            continue
+                        else:
+                            if self.verbose:
+                                console.print("[yellow]Cannot retry - max attempts reached. Accepting current result.[/yellow]")
+                            break
+                    elif reflection.command.action == "search_more_code":
+                        if self.verbose:
+                            console.print(f"[yellow]🔍 Reflection suggests more code search: {reflection.command.reason}[/yellow]")
+                        # TODO: In future, could trigger additional code search here
+                        # For now, just add to context and continue
+                        context_msg = f"Reflection suggests searching for: {reflection.command.search_params}\n"
+                        context_msg += f"Reason: {reflection.command.reason}\n"
+                        state.add_context(context_msg)
+                        break
+
+                except Exception as e:
+                    state.add_execution("reflection_agent", success=False, error_message=str(e), iteration=refinement_iteration)
+                    if self.verbose:
+                        console.print(f"[yellow]Reflection failed: {str(e)[:200]}. Accepting current analysis.[/yellow]")
+                    break
+            else:
+                # No reflection needed or max iterations reached
+                if refinement_iteration >= state.max_refinement_iterations and self.verbose:
+                    console.print(f"[yellow]Max refinement iterations ({state.max_refinement_iterations}) reached[/yellow]")
+                break
 
         if not report:
             console.print(f"[red]Deep analysis failed after {state.deep_analyzer_attempts} attempts[/red]")
@@ -164,13 +233,13 @@ class DependabotAnalyzer:
 
         # Phase 4: False Positive Check (only for exploitable alerts)
         if state.final_report and state.final_report.is_exploitable:
+            if self.verbose:
+                console.print("\n[bold cyan]━━━ Phase 3: False Positive Check ━━━[/bold cyan]")
+
             state.current_phase = "fp_check"
             state.increment_attempts("false_positive_checker")
 
             try:
-                if self.verbose:
-                    console.print("[dim]→ Agent: false_positive_checker (LLM)[/dim]")
-                console.print("[cyan]Running false positive check...[/cyan]")
 
                 fp_check = await self.false_positive_checker.check(
                     initial_report=state.final_report,
@@ -191,7 +260,8 @@ class DependabotAnalyzer:
 
             except Exception as e:
                 state.add_execution("false_positive_checker", success=False, error_message=str(e))
-                console.print(f"[yellow]Warning: False positive check failed: {str(e)[:200]}[/yellow]")
+                if self.verbose:
+                    console.print(f"[yellow]Warning: False positive check failed: {str(e)[:200]}[/yellow]")
 
         state.current_phase = "completed"
         return state

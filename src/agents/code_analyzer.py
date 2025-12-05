@@ -136,9 +136,10 @@ class CodeAnalyzer:
         }
     }
 
-    def __init__(self, repo: Repository.Repository, llm_client: Optional['LLMClient'] = None):
+    def __init__(self, repo: Repository.Repository, llm_client: Optional['LLMClient'] = None, verbose: bool = False):
         self.repo = repo
         self.llm = llm_client  # Optional LLM for dynamic pattern extraction
+        self.verbose = verbose
 
     async def extract_vulnerable_functions(
         self,
@@ -226,7 +227,8 @@ Respond in JSON format with these fields:
 
             # If no vulnerable functions found, return None
             if not result.get("vulnerable_functions") or len(result["vulnerable_functions"]) == 0:
-                console.print(f"[yellow]LLM found no specific vulnerable functions for {package_name}[/yellow]")
+                if self.verbose:
+                    console.print(f"[yellow]LLM found no specific vulnerable functions for {package_name}[/yellow]")
                 return None
 
             # Create VulnerabilityPattern from LLM response
@@ -239,11 +241,13 @@ Respond in JSON format with these fields:
                 indicators=result.get("indicators", [])
             )
 
-            console.print(f"[green]LLM extracted {len(pattern.vulnerable_functions)} vulnerable functions[/green]")
+            if self.verbose:
+                console.print(f"[green]LLM extracted {len(pattern.vulnerable_functions)} vulnerable functions[/green]")
             return pattern
 
         except Exception as e:
-            console.print(f"[yellow]LLM extraction failed: {str(e)[:200]}[/yellow]")
+            if self.verbose:
+                console.print(f"[yellow]LLM extraction failed: {str(e)[:200]}[/yellow]")
             return None
 
     async def find_vulnerable_usage(
@@ -267,14 +271,16 @@ Respond in JSON format with these fields:
         Returns:
             List of CodeMatch objects showing vulnerable usage
         """
-        console.print(f"[cyan]Searching for vulnerable usage of {package_name}...[/cyan]")
+        if self.verbose:
+            console.print(f"[cyan]Searching for vulnerable usage of {package_name}...[/cyan]")
 
         # Get vulnerability pattern if we have it (fast path)
         pattern = self._get_vulnerability_pattern(package_name, vulnerability_id)
 
         # If no hardcoded pattern, try LLM extraction
         if not pattern and self.llm and vulnerability_description:
-            console.print(f"[cyan]No hardcoded pattern found, using LLM to extract vulnerable functions...[/cyan]")
+            if self.verbose:
+                console.print(f"[cyan]No hardcoded pattern found, using LLM to extract vulnerable functions...[/cyan]")
             pattern = await self.extract_vulnerable_functions(
                 package_name,
                 vulnerability_description,
@@ -283,7 +289,8 @@ Respond in JSON format with these fields:
 
         # If still no pattern, fall back to generic search
         if not pattern:
-            console.print(f"[yellow]No specific vulnerable functions identified, using generic search[/yellow]")
+            if self.verbose:
+                console.print(f"[yellow]No specific vulnerable functions identified, using generic search[/yellow]")
             return self._generic_package_search(package_name, max_files)
 
         matches = []
@@ -315,13 +322,16 @@ Respond in JSON format with these fields:
                     matches.extend(file_matches)
 
                 except Exception as e:
-                    console.print(f"[dim]Skipping {file_content.path}: {str(e)}[/dim]")
+                    if self.verbose:
+                        console.print(f"[dim]Skipping {file_content.path}: {str(e)}[/dim]")
                     continue
 
-            console.print(f"[green]Found {len(matches)} potential vulnerable usage patterns in {files_scanned} files[/green]")
+            if self.verbose:
+                console.print(f"[green]Found {len(matches)} potential vulnerable usage patterns in {files_scanned} files[/green]")
 
         except Exception as e:
-            console.print(f"[red]Error during code analysis: {str(e)}[/red]")
+            if self.verbose:
+                console.print(f"[red]Error during code analysis: {str(e)}[/red]")
 
         return matches
 

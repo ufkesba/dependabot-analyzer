@@ -30,8 +30,9 @@ class DeepAnalyzer:
     Determines if vulnerabilities are actually exploitable in the codebase context.
     """
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, verbose: bool = False):
         self.llm = llm_client
+        self.verbose = verbose
 
     async def analyze(
         self,
@@ -52,7 +53,8 @@ class DeepAnalyzer:
         Returns:
             AnalysisReport with exploitability assessment and recommendations
         """
-        console.print(f"\n[cyan]Analyzing alert #{alert.number}: {alert.package}[/cyan]")
+        if self.verbose:
+            console.print(f"\n[cyan]Analyzing alert #{alert.number}: {alert.package}[/cyan]")
 
         # Build analysis prompt
         prompt = self._build_analysis_prompt(alert, code_context, code_matches, previous_attempts)
@@ -100,7 +102,8 @@ class DeepAnalyzer:
                 # Print summary
                 status = "🔴 EXPLOITABLE" if report.is_exploitable else "🟢 NOT EXPLOITABLE"
                 console.print(f"{status} (confidence: {report.confidence})")
-                console.print(f"Priority: {report.priority}")
+                if self.verbose:
+                    console.print(f"Priority: {report.priority}")
 
                 return report
 

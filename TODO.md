@@ -23,20 +23,25 @@
 
 ### Phase 2: Reflection Agent (3-5 days)
 
-- [ ] **Create Reflection Agent**
-  - New agent that analyzes uncertain or contradictory results
-  - Detects patterns: "package used but not called", "only in tests", "hardcoded values"
-  - Suggests next steps: more code search, different analysis approach, accept as false positive
+- [x] **Create Reflection Agent** ✅ COMPLETED
+  - Created `ReflectionAgent` class in `src/agents/reflection_agent.py`
+  - Analyzes uncertain or contradictory results with LLM-powered meta-analysis
+  - Detects patterns: "package_imported_not_used", "only_in_tests", "hardcoded_values", "version_only_vulnerability", etc.
+  - Suggests next steps: retry analysis, search more code, accept result, or escalate to manual review
+  - Returns `AnalysisCommand` objects for dynamic routing
 
-- [ ] **Implement Dynamic Workflow Routing**
-  - Allow agents to return `AnalysisCommand` objects specifying next steps
-  - Support branching: Deep Analyzer → Reflection → Code Analyzer (loop back)
-  - Enable adaptive workflows based on analysis quality
+- [x] **Implement Dynamic Workflow Routing** ✅ COMPLETED
+  - Created `AnalysisCommand` Pydantic model with action types: retry_analysis, search_more_code, accept_result, escalate_manual
+  - Integrated into orchestrator workflow with command interpretation
+  - Supports branching: Deep Analyzer → Reflection → Deep Analyzer (with refined context)
+  - Orchestrator acts on reflection commands adaptively
 
-- [ ] **Add Iterative Refinement**
-  - Support multiple rounds of analysis with accumulated context
-  - Track which analysis strategies have been tried
-  - Stop when confidence threshold met or max iterations reached
+- [x] **Add Iterative Refinement** ✅ COMPLETED
+  - Implemented reflection loop in `workflow.py` with max 2 refinement iterations (configurable)
+  - Tracks reflection attempts in `AnalysisState`
+  - Accumulates context from reflection insights (patterns detected, confidence boost suggestions)
+  - Stops when: reflection accepts result, max iterations reached, or escalation recommended
+  - Gracefully degrades when max attempts exceeded
 
 ### Phase 3: Advanced Patterns (1-2 weeks)
 

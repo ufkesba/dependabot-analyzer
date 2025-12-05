@@ -11,6 +11,11 @@ from ..agents.deep_analyzer import AnalysisReport
 from ..agents.code_analyzer import CodeMatch
 from ..agents.false_positive_checker import FalsePositiveCheck
 
+# Forward reference for ReflectionResult to avoid circular import
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..agents.reflection_agent import ReflectionResult
+
 
 class AgentExecution(BaseModel):
     """Record of a single agent execution"""
@@ -34,12 +39,15 @@ class AnalysisState(BaseModel):
     code_context: Optional[str] = None
     reports: List[AnalysisReport] = Field(default_factory=list)
     false_positive_checks: List[FalsePositiveCheck] = Field(default_factory=list)
+    reflection_results: List[Any] = Field(default_factory=list)  # List[ReflectionResult] - using Any to avoid circular import
 
     # Retry tracking
     code_analyzer_attempts: int = 0
     deep_analyzer_attempts: int = 0
     false_positive_checker_attempts: int = 0
+    reflection_agent_attempts: int = 0
     max_retries_per_agent: int = 3
+    max_refinement_iterations: int = 2  # Max times to use reflection agent
 
     # Execution history
     execution_history: List[AgentExecution] = Field(default_factory=list)
@@ -79,8 +87,14 @@ class AnalysisState(BaseModel):
             "code_analyzer": self.code_analyzer_attempts,
             "deep_analyzer": self.deep_analyzer_attempts,
             "false_positive_checker": self.false_positive_checker_attempts,
+            "reflection_agent": self.reflection_agent_attempts,
         }
         attempts = attempt_map.get(agent_name, 0)
+
+        # Reflection agent has different max iterations
+        if agent_name == "reflection_agent":
+            return attempts < self.max_refinement_iterations
+
         return attempts < self.max_retries_per_agent
 
     def increment_attempts(self, agent_name: str) -> None:
@@ -91,6 +105,8 @@ class AnalysisState(BaseModel):
             self.deep_analyzer_attempts += 1
         elif agent_name == "false_positive_checker":
             self.false_positive_checker_attempts += 1
+        elif agent_name == "reflection_agent":
+            self.reflection_agent_attempts += 1
 
     def get_latest_report(self) -> Optional[AnalysisReport]:
         """Get the most recent analysis report"""
