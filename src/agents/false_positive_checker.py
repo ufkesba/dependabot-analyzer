@@ -101,13 +101,17 @@ Key principles:
 5. **Defense in depth**: Consider mitigations and protections in place
 
 Common false positive patterns to watch for:
-- Package is used, but vulnerable functions are not called
-- Vulnerable functions are called, but with hardcoded/safe values
+- Package is imported but never actually used
+- Package is used, but the specific EXPOSED APIs that trigger the vulnerability are not called
+- Vulnerable INTERNAL functions exist, but the exposed APIs that trigger them are never called with untrusted input
+- Vulnerable functions are called, but with hardcoded/safe values only
 - Usage is only in test files, scripts, or development code
-- The vulnerability requires specific conditions that don't exist in the codebase
+- The vulnerability requires specific conditions that don't exist in the codebase (e.g., parsing untrusted data, but app only uses hardcoded/trusted data)
 - The vulnerability is in transitive dependencies not directly used
 - The code path with vulnerability is never executed
 - There are validations/sanitizations in place that prevent exploitation
+
+IMPORTANT: Many vulnerabilities mention internal library functions (e.g., `asn1.fromDer`, `_parseHeader`). Check if the APPLICATION's usage of the library's EXPOSED APIs would actually trigger these internal functions with attacker-controlled input.
 
 Be thorough but fair. If there's genuine risk, confirm it. If it's a false positive, say so clearly."""
 

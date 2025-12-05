@@ -199,9 +199,11 @@ Focus on practical exploitability, not theoretical risk."""
 Perform a thorough analysis to determine:
 
 1. **Exploitability**: Can this vulnerability actually be exploited in this codebase?
-   - Is the vulnerable code path actually used?
-   - Can attacker-controlled input reach the vulnerable code?
+   - CRITICAL: If the vulnerability is in an INTERNAL library function (e.g., internal parsers, recursive helpers, private methods), check if the application uses EXPOSED APIs that would trigger it with untrusted input.
+   - Is the vulnerable code path actually used through the application's usage of the library?
+   - Can attacker-controlled input reach the vulnerable code (either directly or through exposed APIs)?
    - Are there any mitigating factors in how the package is used?
+   - Remember: Just importing the package is NOT exploitable. The application must use it in a way that triggers the vulnerability.
 
 2. **Impact**: If exploitable, what's the real-world impact?
    - Data exposure?

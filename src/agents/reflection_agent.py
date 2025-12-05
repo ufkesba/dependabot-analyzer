@@ -163,6 +163,7 @@ Your role is to:
 
 Common patterns to detect:
 - **package_imported_not_used**: Package is imported but vulnerable functions never called
+- **internal_function_not_triggered**: Vulnerability is in internal library function, but exposed APIs that trigger it are not used with untrusted input
 - **only_in_tests**: Vulnerability only affects test code, not production
 - **hardcoded_values**: Vulnerable function called with hardcoded safe values
 - **version_only_vulnerability**: Alert is version-based with no specific vulnerable function
@@ -170,6 +171,8 @@ Common patterns to detect:
 - **contradictory_reasoning**: Analysis reasoning contradicts the conclusion
 - **insufficient_code_context**: Not enough code was examined to make confident assessment
 - **missing_data_flow_analysis**: Need to trace how user input reaches vulnerable code
+
+IMPORTANT: Many alerts mention internal library functions (e.g., internal parsers, recursive functions). The key question is: does the application use EXPOSED APIs that would trigger these internal functions with untrusted input?
 
 Be pragmatic:
 - Low confidence on first attempt → suggest specific improvements

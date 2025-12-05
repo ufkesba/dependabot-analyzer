@@ -47,6 +47,62 @@ class AlertFetcher:
         self.gh = Github(auth=auth)
         self.repo = self.gh.get_repo(repo_name)
 
+    def get_alert_by_id(self, alert_id: int) -> Optional[DependabotAlert]:
+        """
+        Fetch a specific Dependabot alert by its ID.
+
+        Args:
+            alert_id: The alert number to fetch
+
+        Returns:
+            DependabotAlert object if found, None otherwise
+        """
+        console.print(f"[cyan]Fetching alert #{alert_id} from {self.repo_name}...[/cyan]")
+
+        try:
+            # Get specific Dependabot alert using the API endpoint
+            url = f"/repos/{self.repo_name}/dependabot/alerts/{alert_id}"
+            headers, alert = self.repo._requester.requestJsonAndCheck("GET", url)
+
+            # Parse alert data from API response
+            security_advisory = alert.get('security_advisory', {})
+            security_vulnerability = alert.get('security_vulnerability', {})
+            dependency = alert.get('dependency', {})
+
+            alert_severity = security_advisory.get('severity', 'unknown').lower()
+
+            # Extract CVE ID from identifiers
+            cve_id = None
+            for identifier in security_advisory.get('identifiers', []):
+                if identifier.get('type') == 'CVE':
+                    cve_id = identifier.get('value')
+                    break
+
+            dependabot_alert = DependabotAlert(
+                number=alert.get('number'),
+                state=alert.get('state', 'open'),
+                dependency=dependency.get('package', {}).get('name', 'unknown'),
+                package=dependency.get('package', {}).get('name', 'unknown'),
+                vulnerability_id=security_advisory.get('ghsa_id', 'unknown'),
+                cve_id=cve_id,
+                severity=alert_severity,
+                cvss_score=security_advisory.get('cvss', {}).get('score'),
+                summary=security_advisory.get('summary', ''),
+                description=security_advisory.get('description', ''),
+                affected_versions=security_vulnerability.get('vulnerable_version_range', 'unknown'),
+                patched_versions=security_vulnerability.get('first_patched_version', {}).get('identifier'),
+                current_version=dependency.get('package', {}).get('ecosystem', 'unknown'),
+                manifest_path=dependency.get('manifest_path', 'unknown'),
+                url=alert.get('html_url', '')
+            )
+
+            console.print(f"[green]✓[/green] Found alert #{alert_id}")
+            return dependabot_alert
+
+        except Exception as e:
+            console.print(f"[red]Error fetching alert #{alert_id}: {str(e)}[/red]")
+            return None
+
     def get_alerts(
         self,
         state: str = "open",

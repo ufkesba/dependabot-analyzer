@@ -36,7 +36,7 @@ class LLMClient:
         # Configure provider
         if provider == "anthropic":
             self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-            self.model = model or "claude-3-5-sonnet-20241022"
+            self.model = model or "claude-haiku-4-5-20251001"
             if not self.api_key:
                 raise ValueError(f"ANTHROPIC_API_KEY not found. Set it in your environment or .env file.")
             self.client = Anthropic(api_key=self.api_key)
