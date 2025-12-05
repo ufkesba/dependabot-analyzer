@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 from anthropic import Anthropic
+import google.generativeai as genai
 from pydantic import BaseModel
 
 
@@ -17,13 +18,11 @@ class LLMResponse(BaseModel):
 class LLMClient:
     """
     Wrapper for LLM API calls with support for multiple providers.
-    Currently configured for Anthropic (Claude).
+    Supports both Anthropic (Claude) and Google (Gemini) with Anthropic as default.
     """
 
-    def __init__(self, provider: str = "anthropic", model: str = "claude-3-5-sonnet-20241022", api_key: Optional[str] = None, enable_logging: bool = True, agent_name: Optional[str] = None):
+    def __init__(self, provider: str = "anthropic", model: str = None, api_key: Optional[str] = None, enable_logging: bool = True, agent_name: Optional[str] = None):
         self.provider = provider
-        self.model = model
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.enable_logging = enable_logging
         self.agent_name = agent_name or "unknown"
 
@@ -34,14 +33,22 @@ class LLMClient:
             self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.conversation_count = 0
 
-        if not self.api_key:
-            raise ValueError(f"API key not found for provider: {provider}")
-
-        # Configure Anthropic
+        # Configure provider
         if provider == "anthropic":
+            self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+            self.model = model or "claude-3-5-sonnet-20241022"
+            if not self.api_key:
+                raise ValueError(f"ANTHROPIC_API_KEY not found. Set it in your environment or .env file.")
             self.client = Anthropic(api_key=self.api_key)
+        elif provider == "google":
+            self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+            self.model = model or "gemini-flash-latest"
+            if not self.api_key:
+                raise ValueError(f"GOOGLE_API_KEY not found. Set it in your environment or .env file.")
+            genai.configure(api_key=self.api_key)
+            self.client = genai.GenerativeModel(self.model)
         else:
-            raise ValueError(f"Provider {provider} not yet implemented. Currently only 'anthropic' is supported.")
+            raise ValueError(f"Provider {provider} not supported. Use 'anthropic' or 'google'.")
 
     def _log_conversation(self, prompt: str, response_text: str, system_prompt: Optional[str] = None, metadata: Optional[Dict] = None):
         """Log conversation to file for debugging and improvement."""
@@ -56,6 +63,7 @@ class LLMClient:
             "session_id": self.session_id,
             "agent_name": self.agent_name,
             "conversation_number": self.conversation_count,
+            "provider": self.provider,
             "model": self.model,
             "system_prompt": system_prompt,
             "user_prompt": prompt,
@@ -86,47 +94,64 @@ class LLMClient:
             LLMResponse with content and metadata
         """
         try:
-            # Prepare messages for Anthropic API
-            messages = [
-                {
-                    "role": "user",
-                    "content": prompt
+            if self.provider == "anthropic":
+                # Anthropic API
+                messages = [{"role": "user", "content": prompt}]
+
+                api_params = {
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "messages": messages
                 }
-            ]
 
-            # Build API call parameters
-            api_params = {
-                "model": self.model,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "messages": messages
-            }
+                if system_prompt:
+                    api_params["system"] = system_prompt
 
-            # Add system prompt if provided
-            if system_prompt:
-                api_params["system"] = system_prompt
+                response = self.client.messages.create(**api_params)
+                response_text = response.content[0].text
+                tokens_used = response.usage.input_tokens + response.usage.output_tokens
 
-            # Generate response
-            response = self.client.messages.create(**api_params)
-
-            # Extract text content from response
-            response_text = response.content[0].text
-
-            # Calculate total tokens used (input + output)
-            tokens_used = response.usage.input_tokens + response.usage.output_tokens
-
-            # Log the conversation
-            self._log_conversation(
-                prompt=prompt,
-                response_text=response_text,
-                system_prompt=system_prompt,
-                metadata={
+                metadata = {
                     "max_tokens": max_tokens,
                     "temperature": temperature,
                     "tokens_used": tokens_used,
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens
                 }
+
+            elif self.provider == "google":
+                # Google Gemini API
+                full_prompt = prompt
+                if system_prompt:
+                    full_prompt = f"{system_prompt}\n\n{prompt}"
+
+                response = self.client.generate_content(
+                    full_prompt,
+                    generation_config=genai.GenerationConfig(
+                        max_output_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+                )
+
+                response_text = response.text
+                tokens_used = response.usage_metadata.total_token_count if hasattr(response, 'usage_metadata') else None
+
+                metadata = {
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "tokens_used": tokens_used
+                }
+
+            else:
+                raise ValueError(f"Unsupported provider: {self.provider}")
+
+            # Log the conversation
+            self._log_conversation(
+                prompt=prompt,
+                response_text=response_text,
+                system_prompt=system_prompt,
+                metadata=metadata
             )
 
             return LLMResponse(
@@ -136,7 +161,7 @@ class LLMClient:
             )
 
         except Exception as e:
-            raise RuntimeError(f"LLM API call failed: {str(e)}")
+            raise RuntimeError(f"LLM API call failed for {self.provider}: {str(e)}")
 
     async def ask_structured(
         self,

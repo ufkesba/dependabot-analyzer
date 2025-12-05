@@ -155,7 +155,8 @@ def init():
         shutil.copy(env_example, env_file)
         console.print("[green]✓[/green] Created .env file from template")
         console.print("[yellow]⚠[/yellow]  Please edit .env and add your API keys:")
-        console.print("  - ANTHROPIC_API_KEY (from https://console.anthropic.com/settings/keys)")
+        console.print("  - ANTHROPIC_API_KEY (primary - from https://console.anthropic.com/settings/keys)")
+        console.print("  - GOOGLE_API_KEY (fallback - from https://aistudio.google.com/app/apikey)")
         console.print("  - GITHUB_TOKEN (from https://github.com/settings/tokens)")
     else:
         console.print("[red]Error: .env.example not found[/red]")
