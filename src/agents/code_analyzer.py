@@ -168,14 +168,15 @@ Summary: {vulnerability_summary}
 Description: {vulnerability_description}
 
 Your task is to identify:
-1. Which specific functions/methods in this package are vulnerable (if any are mentioned)
+1. Which specific functions/methods are DIRECTLY EXPOSED and CALLABLE by application code (if any are mentioned)
 2. What regex patterns would match usage of these vulnerable functions
 3. What indicators suggest the vulnerability is being exploited (e.g., "user input", "req.body")
 
-IMPORTANT:
-- Some vulnerabilities affect ALL uses of a package, not specific functions. If no specific functions are mentioned, return empty arrays.
-- Only include functions that are explicitly mentioned as vulnerable in the description.
-- If the vulnerability is version-based only (e.g., "all versions below X.Y.Z are vulnerable") with no specific function mentioned, return empty arrays.
+CRITICAL DISTINCTIONS:
+- **Internal library functions** (e.g., internal parsers, recursive helpers, private methods): These are NOT directly called by application code. They are triggered indirectly when using exposed APIs. Return EMPTY arrays for these.
+- **Exposed API functions** (e.g., HTTP client methods, template engines, data parsers): These ARE directly called by applications. Include these if they trigger the vulnerability.
+- If the vulnerability is in an internal function that's only triggered when specific exposed APIs are used with untrusted input, identify the EXPOSED APIs, not the internal functions.
+- If no specific EXPOSED functions are mentioned, or if the vulnerability requires indirect triggering, return empty arrays.
 
 Examples:
 
@@ -292,6 +293,12 @@ Respond in JSON format with these fields:
             if self.verbose:
                 console.print(f"[yellow]No specific vulnerable functions identified, using generic search[/yellow]")
             return self._generic_package_search(package_name, max_files)
+
+        # Display what vulnerable functions we're searching for
+        if self.verbose:
+            console.print(f"[cyan]Searching for vulnerable functions:[/cyan] {', '.join(pattern.vulnerable_functions)}")
+            if pattern.patterns:
+                console.print(f"[dim]Using {len(pattern.patterns)} regex patterns[/dim]")
 
         matches = []
         files_scanned = 0

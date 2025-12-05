@@ -133,7 +133,7 @@ python main.py analyze owner/repo --provider google --model gemini-2.0-flash-exp
 **Anthropic Claude** (requires API key):
 ```bash
 # Add to .env: ANTHROPIC_API_KEY=your_key
-python main.py analyze owner/repo --provider anthropic --model claude-3-5-sonnet-20241022
+python main.py analyze owner/repo --provider anthropic --model claude-haiku-4-5-20251001
 ```
 
 **OpenAI GPT** (requires API key):

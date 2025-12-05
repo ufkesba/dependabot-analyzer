@@ -338,16 +338,8 @@ class DependabotAnalyzer:
             border_style="cyan"
         ))
 
-        # Fetch all alerts to find the specific one
-        console.print(f"[cyan]Fetching alert #{alert_id} from {self.repo}...[/cyan]")
-        all_alerts = self.alert_fetcher.get_alerts(state="all")
-
-        # Find the specific alert
-        target_alert = None
-        for alert in all_alerts:
-            if alert.number == alert_id:
-                target_alert = alert
-                break
+        # Fetch the specific alert directly
+        target_alert = self.alert_fetcher.get_alert_by_id(alert_id)
 
         if not target_alert:
             console.print(f"[red]Error: Alert #{alert_id} not found in repository[/red]")
