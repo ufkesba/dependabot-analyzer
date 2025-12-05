@@ -13,6 +13,7 @@ graph TB
         AlertFetcher[AlertFetcher Agent<br/>Fetches alerts & code context]
         CodeAnalyzer[CodeAnalyzer Agent<br/>Pattern matching & search]
         DeepAnalyzer[DeepAnalyzer Agent<br/>LLM-powered analysis]
+        ReflectionAgent[ReflectionAgent<br/>Quality assessment & routing]
         FPChecker[FalsePositiveChecker Agent<br/>LLM validation]
     end
 
@@ -43,7 +44,13 @@ graph TB
     Gemini -->|JSON response<br/>Exploitability assessment| DeepAnalyzer
     DeepAnalyzer -->|AnalysisReport| Orchestrator
 
-    Orchestrator -->|4. Validate findings<br/>Only if exploitable| FPChecker
+    Orchestrator -->|4. Quality check| ReflectionAgent
+    ReflectionAgent -->|Reflection prompt<br/>Report + History| Gemini
+    Gemini -->|JSON response<br/>Quality assessment + Command| ReflectionAgent
+    ReflectionAgent -->|ReflectionResult + Command| Orchestrator
+    Orchestrator -->|If retry command| DeepAnalyzer
+
+    Orchestrator -->|5. Validate findings<br/>Only if exploitable| FPChecker
     FPChecker -->|Critical validation prompt<br/>Report + Evidence| Gemini
     Gemini -->|JSON response<br/>False positive assessment| FPChecker
     FPChecker -->|FalsePositiveCheck<br/>Corrected report| Orchestrator
@@ -57,7 +64,7 @@ graph TB
     classDef llmClass fill:#fff4e6,stroke:#ff9800,stroke-width:2px
     classDef outputClass fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
 
-    class AlertFetcher,CodeAnalyzer,DeepAnalyzer,FPChecker agentClass
+    class AlertFetcher,CodeAnalyzer,DeepAnalyzer,ReflectionAgent,FPChecker agentClass
     class GH,Repo githubClass
     class Gemini llmClass
     class Reports,Console outputClass
@@ -97,7 +104,22 @@ graph TB
   - `priority`: critical/high/medium/low
   - `recommended_action`: next steps
 
-### 4. **FalsePositiveChecker Agent** (LLM Validation)
+### 4. **ReflectionAgent** (Quality Assessment - Phase 2)
+- **Purpose**: Meta-analysis of result quality with dynamic workflow routing
+- **Interactions**:
+  - → Gemini API: Sends reflection prompt with analysis history
+  - → Reviews confidence, detects patterns, suggests improvements
+  - ← Returns: `ReflectionResult` with assessment and routing command
+- **Commands**:
+  - `accept_result`: Proceed to next phase
+  - `retry_analysis`: Loop back to DeepAnalyzer with refined context
+  - `search_more_code`: Request additional code search (future)
+  - `escalate_manual`: Flag for human review
+- **Pattern Detection**:
+  - Identifies: package_imported_not_used, only_in_tests, contradictory_reasoning, etc.
+  - Max 2 refinement iterations per alert
+
+### 5. **FalsePositiveChecker Agent** (LLM Validation)
 - **Purpose**: Critically validates findings to reduce false positives
 - **Interactions**:
   - → Gemini API: Sends skeptical validation prompt
@@ -109,13 +131,16 @@ graph TB
   - Identifies over-inflated severity
   - Corrects priority and exploitability if needed
 
-### 5. **DependabotAnalyzer** (Orchestrator)
-- **Purpose**: Coordinates the entire workflow
+### 6. **DependabotAnalyzer** (Orchestrator)
+- **Purpose**: Coordinates the entire workflow with adaptive routing
 - **Workflow**:
   1. Fetch alerts (AlertFetcher)
   2. Search for vulnerable patterns (CodeAnalyzer)
-  3. Deep analysis (DeepAnalyzer → Gemini)
-  4. False positive check (FPChecker → Gemini) - conditional
+  3. Deep analysis loop (up to 3 attempts):
+     - DeepAnalyzer → Gemini
+     - ReflectionAgent → Gemini (up to 2 iterations)
+     - If reflection suggests retry: loop back to DeepAnalyzer with refined context
+  4. False positive check (FPChecker → Gemini) - only if exploitable
   5. Apply corrections and generate reports
   6. Display summary and save to JSON
 
@@ -128,7 +153,15 @@ GitHub Code → CodeAnalyzer → CodeMatch[]
                      ↓
      [Alert + Code + Matches] → DeepAnalyzer → Gemini API
                      ↓
-              AnalysisReport (if exploitable)
+              AnalysisReport
+                     ↓
+     [Report + History] → ReflectionAgent → Gemini API
+                     ↓
+              ReflectionResult + Command
+                     ↓
+         (if retry: loop back to DeepAnalyzer with context)
+                     ↓
+              AnalysisReport (final, if exploitable)
                      ↓
      [Report + Matches] → FalsePositiveChecker → Gemini API
                      ↓
