@@ -7,24 +7,24 @@ github:
 
 # LLM Provider settings
 llm:
-  # Primary model for deep analysis (using Gemini Flash for now)
+  # Primary model for deep analysis (using Claude Sonnet)
   primary:
-    provider: "google"
-    model: "gemini-flash-latest"  # Fast and free via AI Studio
+    provider: "anthropic"
+    model: "claude-3-5-sonnet-20241022"
     max_tokens: 8192
     temperature: 0.1
 
-  # Optional: Upgrade to Claude later for better reasoning
+  # Optional: Switch to other providers if needed
   # primary:
-  #   provider: "anthropic"
-  #   model: "claude-3-5-sonnet-20241022"
-  #   max_tokens: 4096
+  #   provider: "google"
+  #   model: "gemini-flash-latest"
+  #   max_tokens: 8192
   #   temperature: 0.1
 
 # API Keys (use environment variables)
 api_keys:
-  google: "${GOOGLE_API_KEY}"  # From AI Studio
-  # anthropic: "${ANTHROPIC_API_KEY}"  # Optional
+  anthropic: "${ANTHROPIC_API_KEY}"  # From Anthropic Console
+  # google: "${GOOGLE_API_KEY}"  # Optional
   # openai: "${OPENAI_API_KEY}"  # Optional
 
 # Analysis settings

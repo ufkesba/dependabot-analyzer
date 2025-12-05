@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-import google.generativeai as genai
+from anthropic import Anthropic
 from pydantic import BaseModel
 
 
@@ -17,13 +17,13 @@ class LLMResponse(BaseModel):
 class LLMClient:
     """
     Wrapper for LLM API calls with support for multiple providers.
-    Currently configured for Google AI Studio / Gemini.
+    Currently configured for Anthropic (Claude).
     """
 
-    def __init__(self, provider: str = "google", model: str = "gemini-flash-latest", api_key: Optional[str] = None, enable_logging: bool = True, agent_name: Optional[str] = None):
+    def __init__(self, provider: str = "anthropic", model: str = "claude-3-5-sonnet-20241022", api_key: Optional[str] = None, enable_logging: bool = True, agent_name: Optional[str] = None):
         self.provider = provider
         self.model = model
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.enable_logging = enable_logging
         self.agent_name = agent_name or "unknown"
 
@@ -37,12 +37,11 @@ class LLMClient:
         if not self.api_key:
             raise ValueError(f"API key not found for provider: {provider}")
 
-        # Configure Google AI
-        if provider == "google":
-            genai.configure(api_key=self.api_key)
-            self.client = genai.GenerativeModel(model)
+        # Configure Anthropic
+        if provider == "anthropic":
+            self.client = Anthropic(api_key=self.api_key)
         else:
-            raise ValueError(f"Provider {provider} not yet implemented. Currently only 'google' is supported.")
+            raise ValueError(f"Provider {provider} not yet implemented. Currently only 'anthropic' is supported.")
 
     def _log_conversation(self, prompt: str, response_text: str, system_prompt: Optional[str] = None, metadata: Optional[Dict] = None):
         """Log conversation to file for debugging and improvement."""
@@ -87,36 +86,51 @@ class LLMClient:
             LLMResponse with content and metadata
         """
         try:
-            # Combine system prompt if provided
-            full_prompt = prompt
+            # Prepare messages for Anthropic API
+            messages = [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+
+            # Build API call parameters
+            api_params = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": messages
+            }
+
+            # Add system prompt if provided
             if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
+                api_params["system"] = system_prompt
 
             # Generate response
-            response = self.client.generate_content(
-                full_prompt,
-                generation_config=genai.GenerationConfig(
-                    max_output_tokens=max_tokens,
-                    temperature=temperature,
-                )
-            )
+            response = self.client.messages.create(**api_params)
 
-            tokens_used = response.usage_metadata.total_token_count if hasattr(response, 'usage_metadata') else None
+            # Extract text content from response
+            response_text = response.content[0].text
+
+            # Calculate total tokens used (input + output)
+            tokens_used = response.usage.input_tokens + response.usage.output_tokens
 
             # Log the conversation
             self._log_conversation(
                 prompt=prompt,
-                response_text=response.text,
+                response_text=response_text,
                 system_prompt=system_prompt,
                 metadata={
                     "max_tokens": max_tokens,
                     "temperature": temperature,
-                    "tokens_used": tokens_used
+                    "tokens_used": tokens_used,
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens
                 }
             )
 
             return LLMResponse(
-                content=response.text,
+                content=response_text,
                 model=self.model,
                 tokens_used=tokens_used
             )
@@ -195,7 +209,7 @@ CRITICAL JSON FORMATTING RULES:
                     return json.loads(content)
             except:
                 pass
-            
+
             # Try to repair common JSON issues
             try:
                 content = response.content
@@ -204,19 +218,19 @@ CRITICAL JSON FORMATTING RULES:
                     content = content.split("```json")[1].split("```")[0]
                 elif "```" in content:
                     content = content.split("```")[1].split("```")[0]
-                
+
                 # Find JSON boundaries
                 start = content.find('{')
                 end = content.rfind('}')
                 if start != -1 and end != -1:
                     json_str = content[start:end+1]
-                    
+
                     # Try to fix unterminated strings by finding incomplete field
                     # Split by lines and check for proper closing
                     lines = json_str.split('\n')
                     fixed_lines = []
                     in_string = False
-                    
+
                     for i, line in enumerate(lines):
                         # Count unescaped quotes to detect unterminated strings
                         quote_count = 0
@@ -225,23 +239,23 @@ CRITICAL JSON FORMATTING RULES:
                             if line[j] == '"' and (j == 0 or line[j-1] != '\\'):
                                 quote_count += 1
                             j += 1
-                        
+
                         # If odd number of quotes, string is unterminated
                         if quote_count % 2 == 1:
                             # Terminate the string and try to close the object properly
                             if i == len(lines) - 1 or not line.rstrip().endswith(','):
                                 line = line.rstrip() + '"'
-                        
+
                         fixed_lines.append(line)
-                    
+
                     # Try parsing the fixed JSON
                     fixed_json = '\n'.join(fixed_lines)
-                    
+
                     # If still incomplete, try to close the JSON object
                     open_braces = fixed_json.count('{') - fixed_json.count('}')
                     if open_braces > 0:
                         fixed_json += '\n}' * open_braces
-                    
+
                     return json.loads(fixed_json)
             except Exception as repair_error:
                 # If repair failed, provide detailed error

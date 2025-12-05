@@ -33,8 +33,8 @@ def analyze(
     state: str = typer.Option("open", "--state", help="Alert state: open, fixed, dismissed, or all"),
     min_severity: Optional[str] = typer.Option("medium", "--min-severity", help="Minimum severity: critical, high, medium, low"),
     max_alerts: Optional[int] = typer.Option(None, "--max-alerts", help="Maximum number of alerts to analyze"),
-    model: str = typer.Option("gemini-flash-latest", "--model", help="LLM model to use"),
-    provider: str = typer.Option("google", "--provider", help="LLM provider: google, anthropic, openai"),
+    model: str = typer.Option("claude-3-5-sonnet-20241022", "--model", help="LLM model to use"),
+    provider: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, google, openai"),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving analysis reports"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed agent activity"),
 ):
@@ -89,8 +89,8 @@ def analyze_alert(
     repo: str = typer.Argument(..., help="GitHub repository (format: owner/repo)"),
     alert_id: int = typer.Argument(..., help="Dependabot alert number to analyze"),
     github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub personal access token"),
-    model: str = typer.Option("gemini-flash-latest", "--model", help="LLM model to use"),
-    provider: str = typer.Option("google", "--provider", help="LLM provider: google, anthropic, openai"),
+    model: str = typer.Option("claude-3-5-sonnet-20241022", "--model", help="LLM model to use"),
+    provider: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, google, openai"),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving analysis reports"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed agent activity"),
 ):
@@ -155,7 +155,7 @@ def init():
         shutil.copy(env_example, env_file)
         console.print("[green]✓[/green] Created .env file from template")
         console.print("[yellow]⚠[/yellow]  Please edit .env and add your API keys:")
-        console.print("  - GOOGLE_API_KEY (from https://aistudio.google.com/app/apikey)")
+        console.print("  - ANTHROPIC_API_KEY (from https://console.anthropic.com/settings/keys)")
         console.print("  - GITHUB_TOKEN (from https://github.com/settings/tokens)")
     else:
         console.print("[red]Error: .env.example not found[/red]")

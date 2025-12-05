@@ -2,8 +2,8 @@
 PyGithub==2.1.1
 
 # LLM Providers
-google-generativeai==0.8.3
-# anthropic==0.39.0  # Optional
+anthropic==0.39.0
+# google-generativeai==0.8.3  # Optional
 # openai==1.55.3  # Optional
 
 # Data validation and config
