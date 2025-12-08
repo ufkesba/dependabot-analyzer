@@ -17,12 +17,52 @@ export default function WorkflowDetailPage() {
   const [alert, setAlert] = useState<Alert | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [polling, setPolling] = useState(false);
 
   useEffect(() => {
     if (workflowId) {
       fetchWorkflow();
     }
   }, [workflowId]);
+
+  // Poll for updates while workflow is running
+  useEffect(() => {
+    if (!workflow) return;
+    
+    const isRunning = workflow.status === 'running' || workflow.status === 'pending';
+    if (!isRunning) return;
+
+    setPolling(true);
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/analysis/workflows/${workflowId}/status`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status !== 'running' && data.status !== 'pending') {
+            setPolling(false);
+            clearInterval(interval);
+            // Fetch full workflow data
+            fetchWorkflow();
+          } else {
+            // Update workflow with progress
+            setWorkflow(prev => prev ? { ...prev, ...data } : null);
+          }
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => {
+      clearInterval(interval);
+      setPolling(false);
+    };
+  }, [workflow?.status, workflowId]);
 
   const fetchWorkflow = async () => {
     try {
@@ -68,14 +108,34 @@ export default function WorkflowDetailPage() {
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
-      {/* Back button */}
-      <button
-        onClick={() => router.back()}
-        className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--foreground)] mb-6"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Back
-      </button>
+      {/* Back button and status indicator */}
+      <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--foreground)]"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </button>
+        
+        <div className="flex items-center gap-4">
+          {polling && (
+            <div className="flex items-center gap-2 text-blue-600">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-sm">Live updating...</span>
+            </div>
+          )}
+          
+          {(workflow.status === 'completed' || workflow.status === 'failed') && (
+            <button
+              onClick={() => router.push(`/dashboard/alerts/${alert.id}`)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+            >
+              Start New Analysis
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Alert Info */}
       <div className="card mb-6">
@@ -110,6 +170,19 @@ export default function WorkflowDetailPage() {
       <div className="mb-8">
         <WorkflowStats workflow={workflow} />
       </div>
+
+      {/* Error Message */}
+      {workflow.status === 'failed' && workflow.error_message && (
+        <div className="card mb-8 bg-red-50 border border-red-200">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="font-semibold text-red-900 mb-1">Analysis Failed</h3>
+              <p className="text-red-800 text-sm">{workflow.error_message}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Workflow Timeline */}
       <div className="card">

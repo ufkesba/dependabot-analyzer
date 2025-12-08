@@ -52,6 +52,8 @@ class AnalysisWorkflowResponse(AnalysisWorkflowBase):
     final_confidence_score: Optional[float] = None
     final_verdict: Optional[str] = None
     code_matches_found: int = 0
+    error_message: Optional[str] = None
+    error_details: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     

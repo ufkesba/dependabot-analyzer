@@ -12,6 +12,7 @@ from app.api import (
     alerts_router,
     dashboard_router,
     workflows_router,
+    analysis_router,
     mock_router,
 )
 
@@ -54,6 +55,7 @@ app.include_router(repositories_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 app.include_router(workflows_router, prefix="/api")
+app.include_router(analysis_router, prefix="/api")
 app.include_router(mock_router, prefix="/api")
 
 

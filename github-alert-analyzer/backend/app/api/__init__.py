@@ -6,6 +6,7 @@ from app.api.routes import (
     alerts_router,
     dashboard_router,
     workflows_router,
+    analysis_router,
 )
 from app.api.routes.mock import router as mock_router
 
@@ -16,5 +17,6 @@ __all__ = [
     "alerts_router",
     "dashboard_router",
     "workflows_router",
+    "analysis_router",
     "mock_router",
 ]

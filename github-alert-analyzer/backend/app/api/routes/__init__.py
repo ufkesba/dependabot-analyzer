@@ -5,6 +5,7 @@ from app.api.routes.repositories import router as repositories_router
 from app.api.routes.alerts import router as alerts_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.workflows import router as workflows_router
+from app.api.routes.analysis import router as analysis_router
 
 __all__ = [
     "auth_router",
@@ -13,4 +14,5 @@ __all__ = [
     "alerts_router",
     "dashboard_router",
     "workflows_router",
+    "analysis_router",
 ]

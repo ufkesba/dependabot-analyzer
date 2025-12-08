@@ -90,6 +90,10 @@ class AnalysisWorkflow(Base):
     final_verdict: Mapped[str | None] = mapped_column(String(100), nullable=True)  # false_positive, true_positive, needs_review
     accumulated_context: Mapped[str | None] = mapped_column(Text, nullable=True)  # Context from retries
     
+    # Error tracking
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
     # Code analysis results
     code_matches_found: Mapped[int] = mapped_column(Integer, default=0)
     code_context: Mapped[str | None] = mapped_column(Text, nullable=True)

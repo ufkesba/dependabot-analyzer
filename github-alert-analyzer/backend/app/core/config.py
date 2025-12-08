@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # LLM Providers
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    google_api_key: str = ""
+    
+    # GitHub
+    github_token: str = ""
     
     # CORS
     cors_origins: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

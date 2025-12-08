@@ -15,6 +15,8 @@ export default function AlertDetailPage() {
   const [workflows, setWorkflows] = useState<AnalysisWorkflow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
 
   useEffect(() => {
     if (alertId) {
@@ -36,6 +38,38 @@ export default function AlertDetailPage() {
       console.error(err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleStartAnalysis = async () => {
+    try {
+      setAnalyzing(true);
+      setAnalysisError('');
+      
+      const response = await fetch(`http://localhost:8000/api/analysis/alerts/${alertId}/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          llm_provider: 'google',
+          llm_model: 'gemini-flash-latest'
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to start analysis');
+      }
+
+      const data = await response.json();
+      router.push(`/dashboard/workflows/${data.workflow_id}`);
+    } catch (err: any) {
+      setAnalysisError(err.message || 'Failed to start analysis');
+      console.error(err);
+    } finally {
+      setAnalyzing(false);
     }
   };
 
@@ -190,13 +224,28 @@ export default function AlertDetailPage() {
             Agentic Analysis Workflows
           </h2>
           {workflows.length === 0 && (
-            <button
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2"
-              onClick={() => {/* TODO: Trigger analysis */}}
-            >
-              <PlayCircle className="w-4 h-4" />
-              Start Analysis
-            </button>
+            <div className="flex flex-col items-end gap-2">
+              <button
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleStartAnalysis}
+                disabled={analyzing}
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Starting Analysis...
+                  </>
+                ) : (
+                  <>
+                    <PlayCircle className="w-4 h-4" />
+                    Start Analysis
+                  </>
+                )}
+              </button>
+              {analysisError && (
+                <p className="text-sm text-red-600">{analysisError}</p>
+              )}
+            </div>
           )}
         </div>
 
