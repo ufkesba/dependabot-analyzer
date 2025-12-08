@@ -363,13 +363,33 @@ async def run_alert_analysis(
         
         console.print(f"[cyan]Final determination: {verdict.upper()}[/cyan]")
         
+        # Build final summary with reasoning
+        summary_parts = []
+        
+        if verdict == "true_positive":
+            summary_parts.append("🔴 **TRUE POSITIVE** - This vulnerability is exploitable in your codebase.")
+        elif verdict == "false_positive":
+            summary_parts.append("🟢 **FALSE POSITIVE** - This vulnerability does not pose a real risk in your codebase.")
+        else:
+            summary_parts.append("🟡 **NEEDS REVIEW** - The analysis requires manual review to determine the risk.")
+        
+        # Add the reasoning from the most relevant source
+        if final_report and hasattr(final_report, 'reasoning'):
+            summary_parts.append(f"\n**Analysis:**\n{final_report.reasoning}")
+        
+        if final_fp_check and hasattr(final_fp_check, 'reasoning'):
+            summary_parts.append(f"\n**False Positive Check:**\n{final_fp_check.reasoning}")
+        
+        final_summary = "\n".join(summary_parts)
+        
         result = {
             "confidence_score": final_report.confidence if final_report else None,
             "verdict": verdict,
             "exploitability": exploitability,
             "priority": priority,
             "code_matches": len(result_state.code_matches),
-            "analysis_complete": result_state.current_phase in ["completed", "failed"]
+            "analysis_complete": result_state.current_phase in ["completed", "failed"],
+            "summary": final_summary
         }
         
         # Update workflow counters
@@ -384,6 +404,7 @@ async def run_alert_analysis(
             workflow.failed_executions = sum(1 for e in result_state.execution_history if not e.success)
             workflow.code_matches_found = len(result_state.code_matches)
             workflow.current_phase = result_state.current_phase
+            workflow.final_summary = final_summary
             db.commit()
         
         return result

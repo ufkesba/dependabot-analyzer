@@ -81,7 +81,7 @@ class AlertResponse(AlertBase):
 class AlertDetailResponse(AlertResponse):
     """Schema for detailed alert response with all analyses."""
     analyses: List[AlertAnalysisResponse] = []
-    repository_name: Optional[str] = None
+    repository_full_name: Optional[str] = None
 
 
 class AlertListResponse(BaseModel):

@@ -193,6 +193,29 @@ export default function AlertDetailPage() {
               Last analyzed: {new Date(alert.last_analyzed_at).toLocaleString()}
             </div>
           )}
+          
+          {/* Analysis Summary from latest workflow */}
+          {workflows.length > 0 && workflows[0].status === 'completed' && workflows[0].final_summary && (
+            <div className="mt-4 pt-4 border-t">
+              <h4 className="text-sm font-semibold mb-2">Analysis Reasoning</h4>
+              <div className="text-sm text-gray-700">
+                {workflows[0].final_summary.split('\n').map((line, idx) => {
+                  // Handle bold markdown
+                  const parts = line.split(/(\*\*.*?\*\*)/g);
+                  return (
+                    <p key={idx} className="mb-2 last:mb-0 leading-relaxed">
+                      {parts.map((part, i) => {
+                        if (part.startsWith('**') && part.endsWith('**')) {
+                          return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+                        }
+                        return part;
+                      })}
+                    </p>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -223,7 +246,21 @@ export default function AlertDetailPage() {
             </div>
           </div>
           <div className="text-sm text-gray-600">
-            <div>Alert #{alert.github_alert_number}</div>
+            {alert.repository_full_name && (
+              <a
+                href={`https://github.com/${alert.repository_full_name}/security/dependabot/${alert.github_alert_number}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline mb-2 font-medium"
+                title="View on GitHub"
+              >
+                Alert #{alert.github_alert_number}
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            )}
+            {!alert.repository_full_name && (
+              <div>Alert #{alert.github_alert_number}</div>
+            )}
             <div className="mt-1">
               Created: {new Date(alert.created_at).toLocaleDateString()}
             </div>

@@ -122,7 +122,7 @@ async def get_alert(
         )
     
     response = AlertDetailResponse.model_validate(alert)
-    response.repository_name = alert.repository.full_name
+    response.repository_full_name = alert.repository.full_name
     response.analyses = [AlertAnalysisResponse.model_validate(a) for a in alert.analyses]
     
     return response

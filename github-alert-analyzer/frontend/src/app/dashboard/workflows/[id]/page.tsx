@@ -246,6 +246,29 @@ export default function WorkflowDetailPage() {
         <WorkflowStats workflow={workflow} />
       </div>
 
+      {/* Final Summary */}
+      {workflow.status === 'completed' && workflow.final_summary && (
+        <div className="card mb-8">
+          <h2 className="text-xl font-bold mb-4">Analysis Summary</h2>
+          <div className="prose prose-sm max-w-none text-gray-700">
+            {workflow.final_summary.split('\n').map((line, idx) => {
+              // Handle bold markdown
+              const parts = line.split(/(\*\*.*?\*\*)/g);
+              return (
+                <p key={idx} className="mb-3 last:mb-0 leading-relaxed">
+                  {parts.map((part, i) => {
+                    if (part.startsWith('**') && part.endsWith('**')) {
+                      return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+                    }
+                    return part;
+                  })}
+                </p>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Error Message */}
       {workflow.status === 'failed' && workflow.error_message && (
         <div className="card mb-8 bg-red-50 border border-red-200">

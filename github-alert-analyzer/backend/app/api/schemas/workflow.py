@@ -51,6 +51,7 @@ class AnalysisWorkflowResponse(AnalysisWorkflowBase):
     total_refinements: int = 0
     final_confidence_score: Optional[float] = None
     final_verdict: Optional[str] = None
+    final_summary: Optional[str] = None
     code_matches_found: int = 0
     error_message: Optional[str] = None
     error_details: Optional[str] = None
