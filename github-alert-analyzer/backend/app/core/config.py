@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # GitHub OAuth
     github_client_id: str = ""
     github_client_secret: str = ""
-    github_redirect_uri: str = "http://localhost:3000/api/auth/callback/github"
+    github_redirect_uri: str = "http://localhost:3000/auth/callback/github"
     
     # LLM Providers
     openai_api_key: str = ""

@@ -135,9 +135,40 @@ The mock data includes 5 sample alerts with different severities:
 - Perfect for frontend development and UI testing
 - When you're ready for real data, set up Supabase (see SETUP_GUIDE.md)
 
-## 🛑 Stopping the Backend
+## 🔗 GitHub OAuth (Optional)
+
+To test GitHub OAuth login without setting up a real OAuth app, you can continue using mock mode. 
+
+If you want to set up real GitHub OAuth:
+
+1. **Create GitHub OAuth App:**
+   - Go to https://github.com/settings/developers
+   - Click "New OAuth App"
+   - Application name: `GitHub Alert Analyzer`
+   - Homepage URL: `http://localhost:3000`
+   - Callback URL: `http://localhost:3000/auth/callback/github`
+
+2. **Add credentials to backend/.env:**
+   ```env
+   GITHUB_CLIENT_ID=your_client_id
+   GITHUB_CLIENT_SECRET=your_client_secret
+   GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback/github
+   ```
+
+3. **Restart backend** and test:
+   - Login with demo mode
+   - Go to Dashboard → Settings
+   - Click "Connect GitHub Account"
+   - Authorize on GitHub
+   - You'll be redirected back and authenticated!
+
+## 🛑 Stopping the Servers
 
 ```bash
+# Stop backend
 lsof -ti:8000 | xargs kill -9
+
+# Stop frontend
+lsof -ti:3000 | xargs kill -9
 ```
 

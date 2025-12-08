@@ -129,21 +129,36 @@ The frontend will be available at http://localhost:3000
 
 ## Step 5: GitHub OAuth Setup (Optional)
 
-To enable GitHub repository syncing:
+To enable GitHub repository syncing and OAuth login:
 
 1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
 2. Click "New OAuth App"
 3. Fill in:
    - **Application name**: GitHub Alert Analyzer
    - **Homepage URL**: http://localhost:3000
-   - **Authorization callback URL**: http://localhost:3000/api/auth/callback/github
+   - **Authorization callback URL**: http://localhost:3000/auth/callback/github
+   - **Scopes**: The app will request `read:user`, `user:email`, and `repo` access
 4. Click "Register application"
 5. Copy the **Client ID** and generate a **Client Secret**
 6. Update your `backend/.env`:
    ```env
-   GITHUB_CLIENT_ID=your_client_id
-   GITHUB_CLIENT_SECRET=your_client_secret
+   GITHUB_CLIENT_ID=your_client_id_here
+   GITHUB_CLIENT_SECRET=your_client_secret_here
+   GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback/github
    ```
+7. Restart the backend server:
+   ```bash
+   cd backend
+   python -m uvicorn app.main:app --reload --port 8000
+   ```
+
+### Using GitHub OAuth
+
+Once configured, users can:
+- Click "Connect GitHub Account" in Dashboard → Settings
+- Authorize the app on GitHub
+- Automatically login/register with their GitHub account
+- Sync repositories and Dependabot alerts
 
 ## Step 6: LLM API Keys (Optional)
 

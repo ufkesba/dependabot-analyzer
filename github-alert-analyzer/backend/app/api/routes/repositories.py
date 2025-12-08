@@ -1,11 +1,12 @@
 """Repository API routes."""
 from typing import Optional
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.database import get_db
-from app.models import Repository, Alert
+from app.models import Repository, Alert, OAuthConnection
 from app.api.schemas import (
     RepositoryResponse,
     RepositoryUpdate,
@@ -54,18 +55,190 @@ async def list_repositories(
     )
 
 
-@router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
-async def sync_repositories(
+@router.get("/available", status_code=status.HTTP_200_OK)
+async def get_available_repositories(
     current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
-    """Sync repositories from GitHub."""
-    # TODO: Implement GitHub API call to fetch repositories
-    # This would require GitHub OAuth connection
-    return {
-        "status": "accepted",
-        "message": "Repository sync started. This is a placeholder - implement GitHub OAuth first."
-    }
+    """Fetch available repositories from GitHub without syncing."""
+    # Get the user's GitHub OAuth connection
+    oauth_conn = db.query(OAuthConnection).filter(
+        OAuthConnection.user_id == current_user.id,
+        OAuthConnection.provider == "github"
+    ).first()
+    
+    if not oauth_conn or not oauth_conn.access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub account not connected. Please connect your GitHub account first."
+        )
+    
+    try:
+        # Fetch repositories from GitHub API
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "Authorization": f"Bearer {oauth_conn.access_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28"
+            }
+            
+            response = await client.get(
+                "https://api.github.com/user/repos",
+                headers=headers,
+                params={
+                    "type": "all",
+                    "sort": "updated",
+                    "per_page": 100
+                }
+            )
+            response.raise_for_status()
+            github_repos = response.json()
+        
+        # Get already synced repository IDs
+        synced_repo_ids = set(
+            db.query(Repository.github_repo_id)
+            .filter(Repository.user_id == current_user.id)
+            .all()
+        )
+        synced_repo_ids = {str(id[0]) for id in synced_repo_ids}
+        
+        # Format repository data
+        available_repos = []
+        for repo_data in github_repos:
+            repo_id = str(repo_data["id"])
+            available_repos.append({
+                "github_repo_id": repo_id,
+                "full_name": repo_data["full_name"],
+                "name": repo_data["name"],
+                "description": repo_data.get("description"),
+                "is_private": repo_data["private"],
+                "primary_language": repo_data.get("language"),
+                "html_url": repo_data["html_url"],
+                "is_synced": repo_id in synced_repo_ids
+            })
+        
+        return {
+            "repositories": available_repos,
+            "total": len(available_repos)
+        }
+        
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"GitHub API error: {e.response.status_code}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch repositories: {str(e)}"
+        )
+
+
+@router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
+async def sync_repositories(
+    repo_ids: list[int],
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """Sync selected repositories from GitHub."""
+    if not repo_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No repositories selected"
+        )
+    
+    # Get the user's GitHub OAuth connection
+    oauth_conn = db.query(OAuthConnection).filter(
+        OAuthConnection.user_id == current_user.id,
+        OAuthConnection.provider == "github"
+    ).first()
+    
+    if not oauth_conn or not oauth_conn.access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub account not connected. Please connect your GitHub account first."
+        )
+    
+    try:
+        # Fetch repositories from GitHub API
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "Authorization": f"Bearer {oauth_conn.access_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28"
+            }
+            
+            response = await client.get(
+                "https://api.github.com/user/repos",
+                headers=headers,
+                params={
+                    "type": "all",
+                    "sort": "updated",
+                    "per_page": 100
+                }
+            )
+            response.raise_for_status()
+            github_repos = response.json()
+        
+        # Filter to only selected repositories
+        selected_repos = [r for r in github_repos if r["id"] in repo_ids]
+        
+        if not selected_repos:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Selected repositories not found in your GitHub account"
+            )
+        
+        # Create or update repositories in database
+        synced_count = 0
+        for repo_data in selected_repos:
+            repo = db.query(Repository).filter(
+                Repository.github_repo_id == repo_data["id"],
+                Repository.user_id == current_user.id
+            ).first()
+            
+            if repo:
+                # Update existing repository
+                repo.full_name = repo_data["full_name"]
+                repo.is_private = repo_data["private"]
+                repo.description = repo_data.get("description")
+                repo.primary_language = repo_data.get("language")
+                repo.is_monitored = True
+            else:
+                # Create new repository
+                repo = Repository(
+                    user_id=current_user.id,
+                    github_repo_id=repo_data["id"],
+                    full_name=repo_data["full_name"],
+                    is_private=repo_data["private"],
+                    description=repo_data.get("description"),
+                    primary_language=repo_data.get("language"),
+                    is_monitored=True,
+                    sync_status="pending"
+                )
+                db.add(repo)
+            
+            synced_count += 1
+        
+        db.commit()
+        
+        return {
+            "status": "accepted",
+            "message": f"Successfully synced {synced_count} repositories from GitHub."
+        }
+        
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"GitHub API error: {e.response.status_code}"
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync repositories: {str(e)}"
+        )
+
 
 
 @router.get("/{repo_id}", response_model=RepositoryResponse)
@@ -117,6 +290,30 @@ async def update_repository(
     db.refresh(repo)
     
     return RepositoryResponse.model_validate(repo)
+
+
+@router.delete("/{repo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_repository(
+    repo_id: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """Unlink (delete) a repository from monitoring."""
+    repo = db.query(Repository).filter(
+        Repository.id == repo_id,
+        Repository.user_id == current_user.id
+    ).first()
+    
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found"
+        )
+    
+    db.delete(repo)
+    db.commit()
+    
+    return None
 
 
 @router.post("/{repo_id}/sync-alerts", status_code=status.HTTP_202_ACCEPTED)

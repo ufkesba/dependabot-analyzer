@@ -84,6 +84,41 @@ npm run dev
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
 
+## GitHub OAuth Setup (Optional)
+
+To enable GitHub repository syncing and OAuth login:
+
+1. **Create GitHub OAuth App:**
+   - Go to https://github.com/settings/developers
+   - Click "New OAuth App"
+   - **Application name**: `GitHub Alert Analyzer`
+   - **Homepage URL**: `http://localhost:3000`
+   - **Authorization callback URL**: `http://localhost:3000/auth/callback/github`
+
+2. **Add to backend/.env:**
+   ```env
+   GITHUB_CLIENT_ID=your_github_client_id
+   GITHUB_CLIENT_SECRET=your_github_client_secret
+   GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback/github
+   ```
+
+3. **Restart the backend** and test:
+   - Go to Dashboard → Settings
+   - Click "Connect GitHub Account"
+   - Authorize and you'll be logged in!
+
+## Quick Start (No Database)
+
+Want to test the UI without setting up a database? Use **Demo Mode**:
+
+1. Start the backend: `cd backend && python -m uvicorn app.main:app --reload --port 8000`
+2. Start the frontend: `cd frontend && npm run dev`
+3. Open http://localhost:3000/auth/login
+4. **Check "Demo Mode"** and click "Enter Demo"
+5. Explore with mock data!
+
+See [QUICK_START.md](./QUICK_START.md) for mock endpoints and testing.
+
 ## Project Structure
 
 ```
@@ -135,8 +170,16 @@ See `.env.example` files in both `backend/` and `frontend/` directories for requ
 
 ### Authentication
 - `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - Login
+- `POST /api/auth/login` - Login with email/password
 - `GET /api/auth/me` - Get current user
+- `GET /api/auth/github/login` - Initiate GitHub OAuth flow
+- `GET /api/auth/github/callback` - GitHub OAuth callback handler
+
+### Mock Endpoints (Testing)
+- `POST /api/mock/login` - Demo login (no credentials needed)
+- `GET /api/mock/dashboard/stats` - Mock dashboard data
+- `GET /api/mock/repositories` - Mock repositories
+- `GET /api/mock/alerts` - Mock alerts
 
 ### Repositories
 - `GET /api/repositories` - List repositories

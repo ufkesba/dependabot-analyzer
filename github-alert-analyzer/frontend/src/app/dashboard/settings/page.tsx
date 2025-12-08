@@ -1,16 +1,35 @@
 'use client';
 
+import { useState } from 'react';
 import { useAuthStore } from '@/lib/store';
-import { Settings, User, Key, Github, LogOut } from 'lucide-react';
+import { Settings, User, Key, Github, LogOut, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { api } from '@/lib/api';
 
 export default function SettingsPage() {
   const { user, logout } = useAuthStore();
   const router = useRouter();
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [error, setError] = useState('');
 
   const handleLogout = () => {
     logout();
     router.push('/');
+  };
+
+  const handleGitHubConnect = async () => {
+    setIsConnecting(true);
+    setError('');
+    
+    try {
+      const { data } = await api.get('/api/auth/github/login');
+      // Redirect to GitHub OAuth
+      window.location.href = data.auth_url;
+    } catch (err) {
+      setError('Failed to initiate GitHub connection');
+      console.error(err);
+      setIsConnecting(false);
+    }
   };
 
   return (
@@ -101,9 +120,27 @@ export default function SettingsPage() {
           <p className="text-[var(--muted)] mb-4">
             Connect your GitHub account to sync repositories and alerts.
           </p>
-          <button className="btn-primary flex items-center gap-2">
-            <Github className="w-4 h-4" />
-            Connect GitHub Account
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-3 rounded-lg text-sm mb-4">
+              {error}
+            </div>
+          )}
+          <button 
+            onClick={handleGitHubConnect}
+            disabled={isConnecting}
+            className="btn-primary flex items-center gap-2"
+          >
+            {isConnecting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Connecting...
+              </>
+            ) : (
+              <>
+                <Github className="w-4 h-4" />
+                Connect GitHub Account
+              </>
+            )}
           </button>
         </div>
 
