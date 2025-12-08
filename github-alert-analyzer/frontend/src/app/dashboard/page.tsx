@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertTriangle, FolderGit2, Brain, TrendingUp, Loader2 } from 'lucide-react';
 import { dashboardApi, DashboardStats } from '@/lib/api';
 import { cn, getSeverityColor, formatRelativeTime } from '@/lib/utils';
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -143,7 +145,8 @@ export default function DashboardPage() {
               {stats.recent_alerts.map((alert) => (
                 <div
                   key={alert.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-[var(--background)] border border-[var(--border)]"
+                  className="flex items-center justify-between p-3 rounded-lg bg-[var(--background)] border border-[var(--border)] hover:border-primary-500 transition-colors cursor-pointer"
+                  onClick={() => router.push(`/dashboard/alerts/${alert.id}`)}
                 >
                   <div className="flex items-center gap-4">
                     <span className={cn('px-2 py-1 rounded text-xs font-medium', getSeverityColor(alert.severity))}>

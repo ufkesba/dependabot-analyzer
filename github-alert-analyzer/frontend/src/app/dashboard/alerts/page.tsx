@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertTriangle, Loader2, Search, Filter } from 'lucide-react';
 import { alertsApi, Alert } from '@/lib/api';
 import { cn, getSeverityColor } from '@/lib/utils';
 
 export default function AlertsPage() {
+  const router = useRouter();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -98,7 +100,11 @@ export default function AlertsPage() {
       ) : (
         <div className="space-y-4">
           {filteredAlerts.map((alert) => (
-            <div key={alert.id} className="card hover:border-primary-500/50 transition-colors">
+            <div 
+              key={alert.id} 
+              className="card hover:border-primary-500 transition-colors cursor-pointer"
+              onClick={() => router.push(`/dashboard/alerts/${alert.id}`)}
+            >
               <div className="flex items-start gap-4">
                 <div className={cn(
                   "w-2 h-2 rounded-full mt-2",

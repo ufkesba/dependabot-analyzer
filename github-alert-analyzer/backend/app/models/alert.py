@@ -48,6 +48,7 @@ class Alert(Base):
     repository = relationship("Repository", back_populates="alerts")
     vulnerability = relationship("Vulnerability", back_populates="alert", uselist=False, cascade="all, delete-orphan")
     analyses = relationship("AlertAnalysis", back_populates="alert", cascade="all, delete-orphan")
+    workflows = relationship("AnalysisWorkflow", back_populates="alert", cascade="all, delete-orphan")
     
     def __repr__(self) -> str:
         return f"<Alert {self.package_name} ({self.severity})>"

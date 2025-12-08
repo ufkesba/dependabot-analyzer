@@ -2,6 +2,7 @@
 from app.models.user import User, OAuthConnection, LLMConfiguration
 from app.models.repository import Repository, SyncJob
 from app.models.alert import Alert, Vulnerability, AlertAnalysis
+from app.models.agent_execution import AgentExecution, AnalysisWorkflow
 
 __all__ = [
     "User",
@@ -12,4 +13,6 @@ __all__ = [
     "Alert",
     "Vulnerability",
     "AlertAnalysis",
+    "AgentExecution",
+    "AnalysisWorkflow",
 ]

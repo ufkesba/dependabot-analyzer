@@ -30,6 +30,15 @@ from app.api.schemas.alert import (
     BulkAnalyzeRequest,
     DashboardStats,
 )
+from app.api.schemas.workflow import (
+    AgentExecutionBase,
+    AgentExecutionResponse,
+    AnalysisWorkflowBase,
+    AnalysisWorkflowResponse,
+    AnalysisWorkflowDetailResponse,
+    WorkflowPhaseStats,
+    WorkflowSummary,
+)
 
 __all__ = [
     "UserBase",
@@ -57,4 +66,11 @@ __all__ = [
     "AnalyzeAlertRequest",
     "BulkAnalyzeRequest",
     "DashboardStats",
+    "AgentExecutionBase",
+    "AgentExecutionResponse",
+    "AnalysisWorkflowBase",
+    "AnalysisWorkflowResponse",
+    "AnalysisWorkflowDetailResponse",
+    "WorkflowPhaseStats",
+    "WorkflowSummary",
 ]

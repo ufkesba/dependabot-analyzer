@@ -42,5 +42,5 @@ def get_db():
 
 def init_db():
     """Initialize database tables."""
-    from app.models import user, repository, alert  # noqa: F401
+    from app.models import user, repository, alert, agent_execution  # noqa: F401
     Base.metadata.create_all(bind=engine)
