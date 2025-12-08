@@ -53,9 +53,13 @@ async def get_dashboard_stats(
     ).group_by(Alert.package_ecosystem).all()
     
     # Recent alerts
-    recent_alerts = db.query(Alert).filter(
+    recent_alerts = db.query(Alert).join(Repository).filter(
         Alert.repository_id.in_(repo_ids)
     ).order_by(Alert.created_at.desc()).limit(5).all()
+    
+    # Add repository full_name to each alert
+    for alert in recent_alerts:
+        alert.repository_full_name = alert.repository.full_name
     
     # Monitored repositories
     repos_monitored = db.query(func.count(Repository.id)).filter(

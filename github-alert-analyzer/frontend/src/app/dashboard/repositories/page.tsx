@@ -20,6 +20,7 @@ export default function RepositoriesPage() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncingRepoId, setSyncingRepoId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   
@@ -106,6 +107,22 @@ export default function RepositoriesPage() {
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to unlink repository');
       console.error(err);
+    }
+  };
+
+  const handleSyncAlerts = async (repoId: string, repoName: string) => {
+    try {
+      setSyncingRepoId(repoId);
+      setError('');
+      setSuccessMessage('');
+      const result = await repositoriesApi.syncAlerts(repoId);
+      setSuccessMessage(result.message || `Successfully synced alerts for ${repoName}`);
+      await fetchRepositories();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to sync alerts');
+      console.error(err);
+    } finally {
+      setSyncingRepoId(null);
     }
   };
 
@@ -307,13 +324,23 @@ export default function RepositoriesPage() {
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <button
-                    onClick={() => handleUnlink(repo.id, repo.full_name)}
-                    className="p-1.5 rounded hover:bg-red-500/10 text-red-500 transition-colors"
-                    title="Unlink repository"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => handleSyncAlerts(repo.id, repo.full_name)}
+                      disabled={syncingRepoId === repo.id}
+                      className="p-1.5 rounded hover:bg-primary-500/10 text-primary-500 transition-colors"
+                      title="Sync alerts"
+                    >
+                      <RefreshCw className={cn("w-4 h-4", syncingRepoId === repo.id && "animate-spin")} />
+                    </button>
+                    <button
+                      onClick={() => handleUnlink(repo.id, repo.full_name)}
+                      className="p-1.5 rounded hover:bg-red-500/10 text-red-500 transition-colors"
+                      title="Unlink repository"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                   <div className="text-right">
                     <div className="flex items-center gap-2 text-sm mb-2">
                       <AlertTriangle className="w-4 h-4 text-red-500" />

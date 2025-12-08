@@ -51,6 +51,7 @@ class AlertResponse(AlertBase):
     """Schema for alert response."""
     id: str
     repository_id: str
+    repository_full_name: Optional[str] = None
     github_alert_number: int
     vulnerable_version_range: Optional[str]
     patched_version: Optional[str]

@@ -151,7 +151,15 @@ export default function DashboardPage() {
                     </span>
                     <div>
                       <p className="font-medium">{alert.package_name}</p>
-                      <p className="text-sm text-[var(--muted)]">{alert.package_ecosystem}</p>
+                      <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                        <span>{alert.package_ecosystem}</span>
+                        {alert.repository_full_name && (
+                          <>
+                            <span>•</span>
+                            <span>{alert.repository_full_name}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <span className="text-sm text-[var(--muted)]">

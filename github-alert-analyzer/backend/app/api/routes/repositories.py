@@ -1,12 +1,14 @@
 """Repository API routes."""
 from typing import Optional
 import httpx
+import json
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.database import get_db
-from app.models import Repository, Alert, OAuthConnection
+from app.models import Repository, Alert, OAuthConnection, Vulnerability
 from app.api.schemas import (
     RepositoryResponse,
     RepositoryUpdate,
@@ -334,11 +336,133 @@ async def sync_repository_alerts(
             detail="Repository not found"
         )
     
-    # TODO: Implement GitHub API call to fetch alerts
-    return {
-        "status": "accepted",
-        "message": f"Alert sync started for {repo.full_name}. This is a placeholder."
-    }
+    # Get the user's GitHub OAuth connection
+    oauth_conn = db.query(OAuthConnection).filter(
+        OAuthConnection.user_id == current_user.id,
+        OAuthConnection.provider == "github"
+    ).first()
+    
+    if not oauth_conn or not oauth_conn.access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub account not connected"
+        )
+    
+    try:
+        # Update sync status
+        repo.sync_status = "syncing"
+        db.commit()
+        
+        # Parse owner/repo from full_name
+        owner, repo_name = repo.full_name.split('/')
+        
+        # Fetch Dependabot alerts from GitHub API
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "Authorization": f"Bearer {oauth_conn.access_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28"
+            }
+            
+            response = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo_name}/dependabot/alerts",
+                headers=headers,
+                params={
+                    "state": "open",
+                    "per_page": 100
+                }
+            )
+            response.raise_for_status()
+            github_alerts = response.json()
+        
+        # Process and store alerts
+        synced_count = 0
+        for alert_data in github_alerts:
+            # Check if alert already exists
+            alert = db.query(Alert).filter(
+                Alert.repository_id == repo_id,
+                Alert.github_alert_number == alert_data["number"]
+            ).first()
+            
+            # Parse security advisory data
+            advisory = alert_data.get("security_advisory", {})
+            vulnerability_data = alert_data.get("security_vulnerability", {})
+            package = vulnerability_data.get("package", {})
+            
+            if alert:
+                # Update existing alert
+                alert.state = alert_data["state"]
+                alert.severity = advisory.get("severity", "unknown")
+                alert.dismissed_at = alert_data.get("dismissed_at")
+                alert.dismissed_by = alert_data.get("dismissed_by", {}).get("login") if alert_data.get("dismissed_by") else None
+                alert.dismissed_reason = alert_data.get("dismissed_reason")
+                alert.fixed_at = alert_data.get("fixed_at")
+            else:
+                # Create new alert
+                alert = Alert(
+                    repository_id=repo_id,
+                    github_alert_number=alert_data["number"],
+                    package_name=package.get("name", "unknown"),
+                    package_ecosystem=package.get("ecosystem", "unknown"),
+                    severity=advisory.get("severity", "unknown"),
+                    state=alert_data["state"],
+                    vulnerable_version_range=vulnerability_data.get("vulnerable_version_range"),
+                    patched_version=vulnerability_data.get("first_patched_version", {}).get("identifier"),
+                    github_created_at=datetime.fromisoformat(alert_data["created_at"].replace("Z", "+00:00")) if alert_data.get("created_at") else None,
+                    dismissed_at=datetime.fromisoformat(alert_data["dismissed_at"].replace("Z", "+00:00")) if alert_data.get("dismissed_at") else None,
+                    dismissed_by=alert_data.get("dismissed_by", {}).get("login") if alert_data.get("dismissed_by") else None,
+                    dismissed_reason=alert_data.get("dismissed_reason"),
+                    fixed_at=datetime.fromisoformat(alert_data["fixed_at"].replace("Z", "+00:00")) if alert_data.get("fixed_at") else None
+                )
+                db.add(alert)
+                db.flush()  # Get the alert ID
+                
+                # Create vulnerability record
+                vulnerability = Vulnerability(
+                    alert_id=alert.id,
+                    cve_id=advisory.get("cve_id"),
+                    ghsa_id=advisory.get("ghsa_id"),
+                    summary=advisory.get("summary"),
+                    description=advisory.get("description"),
+                    severity=advisory.get("severity"),
+                    cvss_score=advisory.get("cvss", {}).get("score"),
+                    cvss_vector=advisory.get("cvss", {}).get("vector_string"),
+                    published_at=datetime.fromisoformat(advisory["published_at"].replace("Z", "+00:00")) if advisory.get("published_at") else None,
+                    references=json.dumps([ref.get("url") for ref in advisory.get("references", [])])
+                )
+                db.add(vulnerability)
+            
+            synced_count += 1
+        
+        # Update repository alert count and sync status
+        repo.alert_count = db.query(func.count(Alert.id)).filter(
+            Alert.repository_id == repo_id,
+            Alert.state == "open"
+        ).scalar()
+        repo.last_synced_at = datetime.now(timezone.utc)
+        repo.sync_status = "completed"
+        
+        db.commit()
+        
+        return {
+            "status": "accepted",
+            "message": f"Successfully synced {synced_count} alerts for {repo.full_name}"
+        }
+        
+    except httpx.HTTPStatusError as e:
+        repo.sync_status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"GitHub API error: {e.response.status_code}"
+        )
+    except Exception as e:
+        repo.sync_status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync alerts: {str(e)}"
+        )
 
 
 @router.get("/{repo_id}/stats")
