@@ -388,11 +388,13 @@ async def sync_repository_alerts(
             advisory = alert_data.get("security_advisory", {})
             vulnerability_data = alert_data.get("security_vulnerability", {})
             package = vulnerability_data.get("package", {})
+            dependency = alert_data.get("dependency", {})
             
             if alert:
                 # Update existing alert
                 alert.state = alert_data["state"]
                 alert.severity = advisory.get("severity", "unknown")
+                alert.manifest_path = dependency.get("manifest_path")
                 alert.dismissed_at = alert_data.get("dismissed_at")
                 alert.dismissed_by = alert_data.get("dismissed_by", {}).get("login") if alert_data.get("dismissed_by") else None
                 alert.dismissed_reason = alert_data.get("dismissed_reason")
@@ -404,6 +406,7 @@ async def sync_repository_alerts(
                     github_alert_number=alert_data["number"],
                     package_name=package.get("name", "unknown"),
                     package_ecosystem=package.get("ecosystem", "unknown"),
+                    manifest_path=dependency.get("manifest_path"),
                     severity=advisory.get("severity", "unknown"),
                     state=alert_data["state"],
                     vulnerable_version_range=vulnerability_data.get("vulnerable_version_range"),

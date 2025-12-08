@@ -1,9 +1,11 @@
 """Workflow analysis API routes."""
 from typing import List, Optional
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from collections import defaultdict
+from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.models import Alert, Repository, AnalysisWorkflow, AgentExecution
@@ -18,6 +20,12 @@ from app.api.deps import CurrentUser
 
 
 router = APIRouter(prefix="/workflows", tags=["Workflows"])
+
+
+class UpdateWorkflowStatusRequest(BaseModel):
+    """Request to update workflow status."""
+    status: str  # completed, failed, cancelled
+    error_message: Optional[str] = None
 
 
 @router.get("/{workflow_id}", response_model=AnalysisWorkflowDetailResponse)
@@ -222,3 +230,72 @@ async def get_workflow_phases(
     )
     
     return [p[0] for p in phases]
+
+
+@router.put("/{workflow_id}/status", response_model=AnalysisWorkflowDetailResponse)
+async def update_workflow_status(
+    workflow_id: str,
+    request: UpdateWorkflowStatusRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+):
+    """Manually update workflow status (for stuck/hanging workflows)."""
+    # Verify workflow belongs to user
+    workflow = (
+        db.query(AnalysisWorkflow)
+        .join(Alert)
+        .join(Repository)
+        .filter(
+            AnalysisWorkflow.id == workflow_id,
+            Repository.user_id == current_user.id
+        )
+        .options(
+            joinedload(AnalysisWorkflow.agent_executions)
+        )
+        .first()
+    )
+    
+    if not workflow:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found"
+        )
+    
+    # Validate status
+    valid_statuses = ["completed", "failed", "cancelled"]
+    if request.status not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        )
+    
+    # Update workflow
+    workflow.status = request.status
+    if not workflow.completed_at:
+        workflow.completed_at = datetime.now(timezone.utc)
+    
+    # Calculate duration if started
+    if workflow.started_at and workflow.completed_at:
+        workflow.total_duration_seconds = (
+            workflow.completed_at - workflow.started_at
+        ).total_seconds()
+    
+    # Update error message if provided
+    if request.error_message:
+        workflow.error_message = request.error_message
+    
+    # Mark any running agent executions as failed
+    for execution in workflow.agent_executions:
+        if execution.status in ["pending", "running"]:
+            execution.status = "failed"
+            execution.completed_at = datetime.now(timezone.utc)
+            if execution.started_at:
+                execution.duration_seconds = (
+                    execution.completed_at - execution.started_at
+                ).total_seconds()
+            execution.error_message = "Workflow manually terminated"
+    
+    db.commit()
+    db.refresh(workflow)
+    
+    return workflow

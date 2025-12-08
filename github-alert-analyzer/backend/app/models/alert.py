@@ -25,6 +25,7 @@ class Alert(Base):
     github_alert_number: Mapped[int] = mapped_column(Integer, nullable=False)
     package_name: Mapped[str] = mapped_column(String(255), nullable=False)
     package_ecosystem: Mapped[str] = mapped_column(String(50), nullable=False)  # npm, pip, maven, etc.
+    manifest_path: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Path to manifest file (package.json, requirements.txt, etc.)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)  # critical, high, medium, low
     state: Mapped[str] = mapped_column(String(20), default="open")  # open, dismissed, fixed
     vulnerable_version_range: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -34,6 +35,14 @@ class Alert(Base):
     dismissed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     dismissed_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
     fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Analysis status tracking
+    risk_status: Mapped[str | None] = mapped_column(String(50), nullable=True)  # true_positive, false_positive, needs_review
+    exploitability_level: Mapped[str | None] = mapped_column(String(50), nullable=True)  # exploitable, not_exploitable, package_unused, test_only
+    action_priority: Mapped[str | None] = mapped_column(String(20), nullable=True)  # critical, high, medium, low, no_action
+    analysis_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0.0 to 1.0
+    last_analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc)

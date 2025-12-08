@@ -135,6 +135,49 @@ class AnalysisService:
                 workflow.final_confidence_score = None
             
             workflow.final_verdict = result.get("verdict")
+            
+            # Update alert with status tracking from analysis results
+            alert = db.query(Alert).filter(Alert.id == alert_id).first()
+            if alert:
+                # Determine risk status from verdict
+                verdict = (result.get("verdict") or "").lower()
+                if "false positive" in verdict or verdict == "false_positive":
+                    alert.risk_status = "false_positive"
+                elif "true positive" in verdict or verdict == "true_positive":
+                    alert.risk_status = "true_positive"
+                else:
+                    alert.risk_status = "needs_review"
+                
+                # Extract exploitability level
+                exploitability = (result.get("exploitability") or "").lower()
+                if "not exploitable" in exploitability or exploitability == "not_exploitable":
+                    alert.exploitability_level = "not_exploitable"
+                elif "exploitable" in exploitability:
+                    alert.exploitability_level = "exploitable"
+                elif "unused" in exploitability or "not used" in exploitability:
+                    alert.exploitability_level = "package_unused"
+                elif "test" in exploitability or "dev" in exploitability:
+                    alert.exploitability_level = "test_only"
+                else:
+                    alert.exploitability_level = None
+                
+                # Extract action priority
+                priority = (result.get("priority") or "").lower()
+                if priority in ["critical", "high", "medium", "low"]:
+                    alert.action_priority = priority
+                elif alert.risk_status == "false_positive":
+                    alert.action_priority = "no_action"
+                elif alert.risk_status == "true_positive" and alert.severity in ["critical", "high"]:
+                    alert.action_priority = "critical" if alert.severity == "critical" else "high"
+                else:
+                    alert.action_priority = "medium"
+                
+                # Set confidence score
+                alert.analysis_confidence = workflow.final_confidence_score
+                
+                # Set last analyzed timestamp
+                alert.last_analyzed_at = datetime.now(timezone.utc)
+            
             db.commit()
             
         except Exception as e:

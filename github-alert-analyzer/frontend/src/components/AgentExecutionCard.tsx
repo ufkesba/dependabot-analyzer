@@ -84,7 +84,10 @@ export function AgentExecutionCard({ execution }: AgentExecutionCardProps) {
 
   return (
     <div className={cn('border-l-4 p-4 rounded-lg shadow-sm', getStatusColor())}>
-      <div className="flex items-start justify-between">
+      <div 
+        className="flex items-start justify-between cursor-pointer hover:opacity-80 transition-opacity"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
         <div className="flex items-center gap-3 flex-1">
           {getStatusIcon()}
           <div className="flex-1">
@@ -97,6 +100,7 @@ export function AgentExecutionCard({ execution }: AgentExecutionCardProps) {
                   <button
                     onMouseEnter={() => setShowTooltip(true)}
                     onMouseLeave={() => setShowTooltip(false)}
+                    onClick={(e) => e.stopPropagation()}
                     className="text-gray-400 hover:text-gray-600 transition-colors"
                     aria-label="Agent information"
                   >
@@ -134,17 +138,13 @@ export function AgentExecutionCard({ execution }: AgentExecutionCardProps) {
               )}
             </div>
           </div>
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1 hover:bg-gray-200 rounded"
-            aria-label="Toggle details"
-          >
+          <div className="flex-shrink-0 p-2 bg-white/80 rounded-full shadow-sm border border-gray-300">
             {isExpanded ? (
-              <ChevronDown className="w-5 h-5" />
+              <ChevronDown className="w-5 h-5 text-gray-700" />
             ) : (
-              <ChevronRight className="w-5 h-5" />
+              <ChevronRight className="w-5 h-5 text-gray-700" />
             )}
-          </button>
+          </div>
         </div>
       </div>
 

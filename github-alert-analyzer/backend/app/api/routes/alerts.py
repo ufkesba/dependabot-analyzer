@@ -26,7 +26,7 @@ async def list_alerts(
     current_user: CurrentUser,
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    per_page: int = Query(20, ge=1, le=1000),
     repository_id: Optional[str] = None,
     severity: Optional[List[str]] = Query(None),
     state: Optional[List[str]] = Query(None),
@@ -65,7 +65,8 @@ async def list_alerts(
     # Paginate
     offset = (page - 1) * per_page
     alerts = query.options(
-        joinedload(Alert.vulnerability)
+        joinedload(Alert.vulnerability),
+        joinedload(Alert.repository)
     ).order_by(
         Alert.created_at.desc()
     ).offset(offset).limit(per_page).all()
@@ -76,6 +77,8 @@ async def list_alerts(
     alert_responses = []
     for alert in alerts:
         alert_dict = AlertResponse.model_validate(alert).model_dump()
+        # Add repository full name
+        alert_dict["repository_full_name"] = alert.repository.full_name if alert.repository else None
         # Get latest analysis
         latest_analysis = db.query(AlertAnalysis).filter(
             AlertAnalysis.alert_id == alert.id,

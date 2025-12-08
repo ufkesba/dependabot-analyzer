@@ -182,27 +182,6 @@ export function WorkflowStats({ workflow }: WorkflowStatsProps) {
             </div>
           </div>
         )}
-        
-        {workflow.llm_model && (
-          <div className="card">
-            <div className="flex items-center gap-2 mb-2">
-              <Target className="w-4 h-4 text-[var(--muted)]" />
-              <span className="text-xs font-medium text-[var(--muted)] uppercase">
-                LLM Model
-              </span>
-            </div>
-            <div className="text-lg font-bold leading-tight">
-              {workflow.llm_model.includes('haiku') ? 'Claude Haiku 4.5' : 
-               workflow.llm_model.includes('sonnet') ? 'Claude Sonnet 3.5' : 
-               workflow.llm_model}
-            </div>
-            {workflow.llm_provider && (
-              <div className="text-xs text-[var(--muted)] mt-1 uppercase">
-                {workflow.llm_provider}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Context */}

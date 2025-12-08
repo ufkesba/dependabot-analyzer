@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Loader2, AlertTriangle, XCircle } from 'lucide-react';
 import { workflowApi, alertsApi, AnalysisWorkflow, Alert } from '@/lib/api';
 import { WorkflowStats } from '@/components/WorkflowStats';
 import { WorkflowTimeline } from '@/components/WorkflowTimeline';
@@ -18,6 +18,8 @@ export default function WorkflowDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [polling, setPolling] = useState(false);
+  const [isTerminating, setIsTerminating] = useState(false);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (workflowId) {
@@ -27,13 +29,23 @@ export default function WorkflowDetailPage() {
 
   // Poll for updates while workflow is running
   useEffect(() => {
+    // Clear any existing interval first
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
     if (!workflow) return;
     
     const isRunning = workflow.status === 'running' || workflow.status === 'pending';
-    if (!isRunning) return;
+    if (!isRunning) {
+      setPolling(false);
+      return;
+    }
 
     setPolling(true);
-    const interval = setInterval(async () => {
+    
+    const pollWorkflow = async () => {
       try {
         const response = await fetch(`http://localhost:8000/api/analysis/workflows/${workflowId}/status`, {
           headers: {
@@ -44,9 +56,12 @@ export default function WorkflowDetailPage() {
         if (response.ok) {
           const data = await response.json();
           if (data.status !== 'running' && data.status !== 'pending') {
+            // Workflow completed - stop polling and fetch full data
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
             setPolling(false);
-            clearInterval(interval);
-            // Fetch full workflow data
             fetchWorkflow();
           } else {
             // Update workflow with progress
@@ -56,10 +71,15 @@ export default function WorkflowDetailPage() {
       } catch (err) {
         console.error('Polling error:', err);
       }
-    }, 3000); // Poll every 3 seconds
+    };
+
+    pollingIntervalRef.current = setInterval(pollWorkflow, 3000);
 
     return () => {
-      clearInterval(interval);
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
       setPolling(false);
     };
   }, [workflow?.status, workflowId]);
@@ -78,6 +98,41 @@ export default function WorkflowDetailPage() {
       console.error(err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleTerminate = async (status: 'failed' | 'cancelled') => {
+    if (!confirm(`Are you sure you want to mark this workflow as ${status}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setIsTerminating(true);
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`http://localhost:8000/api/workflows/${workflowId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          status,
+          error_message: `Workflow manually terminated by user`
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to terminate workflow');
+      }
+
+      const updatedWorkflow = await response.json();
+      setWorkflow(updatedWorkflow);
+      setPolling(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to terminate workflow');
+      console.error(err);
+    } finally {
+      setIsTerminating(false);
     }
   };
 
@@ -124,6 +179,26 @@ export default function WorkflowDetailPage() {
               <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm">Live updating...</span>
             </div>
+          )}
+          
+          {(workflow.status === 'running' || workflow.status === 'pending') && (
+            <button
+              onClick={() => handleTerminate('failed')}
+              disabled={isTerminating}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm disabled:opacity-50"
+            >
+              {isTerminating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Terminating...
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4" />
+                  Terminate Workflow
+                </>
+              )}
+            </button>
           )}
           
           {(workflow.status === 'completed' || workflow.status === 'failed') && (

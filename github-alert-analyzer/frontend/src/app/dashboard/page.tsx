@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, FolderGit2, Brain, TrendingUp, Loader2 } from 'lucide-react';
+import { AlertTriangle, FolderGit2, Brain, TrendingUp, Loader2, Shield, Target } from 'lucide-react';
 import { dashboardApi, DashboardStats } from '@/lib/api';
 import { cn, getSeverityColor, formatRelativeTime } from '@/lib/utils';
+import StatusBadge from '@/components/StatusBadge';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -117,6 +118,46 @@ export default function DashboardPage() {
             })}
           </div>
         </div>
+
+        {/* Alerts by Risk Status */}
+        {stats?.alerts_by_risk_status && Object.keys(stats.alerts_by_risk_status).length > 0 && (
+          <div className="card">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Shield className="w-5 h-5" />
+              Risk Assessment
+            </h2>
+            <div className="space-y-3">
+              {Object.entries(stats.alerts_by_risk_status).map(([status, count]) => (
+                <div key={status} className="flex items-center justify-between">
+                  <StatusBadge type="risk" value={status} size="sm" />
+                  <span className="text-lg font-semibold">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Alerts by Action Priority */}
+        {stats?.alerts_by_priority && Object.keys(stats.alerts_by_priority).length > 0 && (
+          <div className="card">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Target className="w-5 h-5" />
+              Action Priority
+            </h2>
+            <div className="space-y-3">
+              {['critical', 'high', 'medium', 'low', 'no_action'].map((priority) => {
+                const count = stats.alerts_by_priority?.[priority] || 0;
+                if (count === 0) return null;
+                return (
+                  <div key={priority} className="flex items-center justify-between">
+                    <StatusBadge type="priority" value={priority} size="sm" />
+                    <span className="text-lg font-semibold">{count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Alerts by Ecosystem */}
         <div className="card">

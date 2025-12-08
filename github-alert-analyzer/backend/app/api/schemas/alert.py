@@ -43,6 +43,7 @@ class AlertBase(BaseModel):
     """Base alert schema."""
     package_name: str
     package_ecosystem: str
+    manifest_path: Optional[str] = None
     severity: str
     state: str
 
@@ -60,6 +61,14 @@ class AlertResponse(AlertBase):
     dismissed_by: Optional[str]
     dismissed_reason: Optional[str]
     fixed_at: Optional[datetime]
+    
+    # Analysis status tracking
+    risk_status: Optional[str] = None
+    exploitability_level: Optional[str] = None
+    action_priority: Optional[str] = None
+    analysis_confidence: Optional[float] = None
+    last_analyzed_at: Optional[datetime] = None
+    
     created_at: datetime
     updated_at: datetime
     vulnerability: Optional[VulnerabilityResponse] = None
@@ -112,6 +121,8 @@ class DashboardStats(BaseModel):
     alerts_by_severity: Dict[str, int]
     alerts_by_state: Dict[str, int]
     alerts_by_ecosystem: Dict[str, int]
+    alerts_by_risk_status: Optional[Dict[str, int]] = None
+    alerts_by_priority: Optional[Dict[str, int]] = None
     recent_alerts: List[AlertResponse]
     repositories_monitored: int
     total_analyses: int

@@ -52,6 +52,24 @@ async def get_dashboard_stats(
         Alert.repository_id.in_(repo_ids)
     ).group_by(Alert.package_ecosystem).all()
     
+    # Alerts by risk status
+    risk_status_counts = db.query(
+        Alert.risk_status,
+        func.count(Alert.id)
+    ).filter(
+        Alert.repository_id.in_(repo_ids),
+        Alert.risk_status.isnot(None)
+    ).group_by(Alert.risk_status).all()
+    
+    # Alerts by action priority
+    priority_counts = db.query(
+        Alert.action_priority,
+        func.count(Alert.id)
+    ).filter(
+        Alert.repository_id.in_(repo_ids),
+        Alert.action_priority.isnot(None)
+    ).group_by(Alert.action_priority).all()
+    
     # Recent alerts
     recent_alerts = db.query(Alert).join(Repository).filter(
         Alert.repository_id.in_(repo_ids)
@@ -78,6 +96,8 @@ async def get_dashboard_stats(
         alerts_by_severity=dict(severity_counts),
         alerts_by_state=dict(state_counts),
         alerts_by_ecosystem=dict(ecosystem_counts),
+        alerts_by_risk_status=dict(risk_status_counts) if risk_status_counts else None,
+        alerts_by_priority=dict(priority_counts) if priority_counts else None,
         recent_alerts=[AlertResponse.model_validate(a) for a in recent_alerts],
         repositories_monitored=repos_monitored,
         total_analyses=total_analyses,

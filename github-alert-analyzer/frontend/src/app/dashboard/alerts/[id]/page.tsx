@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Loader2, AlertTriangle, ExternalLink, Clock, PlayCircle } from 'lucide-react';
 import { alertsApi, workflowApi, Alert, AnalysisWorkflow } from '@/lib/api';
 import { getSeverityColor, cn } from '@/lib/utils';
+import StatusBadge from '@/components/StatusBadge';
 
 export default function AlertDetailPage() {
   const params = useParams();
@@ -135,6 +136,66 @@ export default function AlertDetailPage() {
         Back to Alerts
       </button>
 
+      {/* Analysis Status Banner */}
+      {(alert.risk_status || alert.exploitability_level || alert.action_priority) && (
+        <div className={cn(
+          "card mb-6 border-l-4",
+          alert.risk_status === 'true_positive' && "border-l-red-500 bg-red-50 dark:bg-red-900/10",
+          alert.risk_status === 'false_positive' && "border-l-green-500 bg-green-50 dark:bg-green-900/10",
+          alert.risk_status === 'needs_review' && "border-l-yellow-500 bg-yellow-50 dark:bg-yellow-900/10"
+        )}>
+          <h3 className="text-lg font-semibold mb-3">Analysis Status</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {alert.risk_status && (
+              <div>
+                <div className="text-sm text-[var(--muted)] mb-1">Risk Assessment</div>
+                <StatusBadge type="risk" value={alert.risk_status} size="md" />
+              </div>
+            )}
+            {alert.exploitability_level && (
+              <div>
+                <div className="text-sm text-[var(--muted)] mb-1">Exploitability</div>
+                <StatusBadge type="exploitability" value={alert.exploitability_level} size="md" />
+              </div>
+            )}
+            {alert.action_priority && (
+              <div>
+                <div className="text-sm text-[var(--muted)] mb-1">Action Priority</div>
+                <StatusBadge type="priority" value={alert.action_priority} size="md" />
+              </div>
+            )}
+          </div>
+          {(alert.analysis_confidence !== null && alert.analysis_confidence !== undefined) && (
+            <div className="mt-4 pt-4 border-t">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Analysis Confidence</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-48 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                      className={cn(
+                        "h-full transition-all",
+                        alert.analysis_confidence >= 0.8 ? "bg-green-500" :
+                        alert.analysis_confidence >= 0.6 ? "bg-yellow-500" :
+                        "bg-red-500"
+                      )}
+                      style={{ width: `${alert.analysis_confidence * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-sm font-semibold">
+                    {Math.round(alert.analysis_confidence * 100)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+          {alert.last_analyzed_at && (
+            <div className="mt-2 text-xs text-[var(--muted)]">
+              Last analyzed: {new Date(alert.last_analyzed_at).toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Alert Header */}
       <div className="card mb-6">
         <div className="flex items-start justify-between mb-4">
@@ -166,6 +227,11 @@ export default function AlertDetailPage() {
             <div className="mt-1">
               Created: {new Date(alert.created_at).toLocaleDateString()}
             </div>
+            {alert.manifest_path && (
+              <div className="mt-2 font-mono text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-2 py-1 rounded border border-blue-200 dark:border-blue-800">
+                📄 {alert.manifest_path}
+              </div>
+            )}
           </div>
         </div>
 

@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Any
 from sqlalchemy.orm import Session
+from rich.console import Console
 
 # Add the parent directory to path to import existing analysis code
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../..'))
@@ -15,6 +16,8 @@ from src.orchestrator.workflow import DependabotAnalyzer
 from src.orchestrator.state import AnalysisState
 from app.models import Alert, AgentExecution
 from app.core.config import settings
+
+console = Console()
 
 
 async def run_alert_analysis(
@@ -252,9 +255,119 @@ async def run_alert_analysis(
         final_report = result_state.final_report
         final_fp_check = result_state.final_fp_check
         
+        # Determine verdict based on available information
+        # Priority: 
+        # 1. If reflection accepted AND has good confidence -> use final report
+        # 2. If false positive check exists with high confidence -> use FP check
+        # 3. If reflection uncertain but FP check confident -> use FP check
+        # 4. Use final report if available
+        # 5. Default to needs_review
+        verdict = "needs_review"  # Default if uncertain
+        exploitability = None
+        priority = None
+        
+        console.print(f"[cyan]Determining final verdict for alert...[/cyan]")
+        
+        # Check if we have a confident false positive check result
+        has_confident_fp_check = (
+            final_fp_check and 
+            hasattr(final_fp_check, 'confidence') and 
+            final_fp_check.confidence == "high"
+        )
+        
+        # Check reflection results first
+        if result_state.reflection_results:
+            last_reflection = result_state.reflection_results[-1]
+            console.print(f"[dim]Reflection: needs_refinement={last_reflection.needs_refinement}, confidence={last_reflection.confidence_assessment}[/dim]")
+            
+            # If reflection accepted the result and confidence is acceptable
+            if (not last_reflection.needs_refinement and 
+                last_reflection.confidence_assessment == "acceptable"):
+                # Use the final report's assessment
+                if final_report:
+                    # Determine verdict based on exploitability
+                    if hasattr(final_report, 'is_exploitable'):
+                        if final_report.is_exploitable:
+                            verdict = "true_positive"
+                            console.print(f"[green]✓ Verdict: TRUE POSITIVE (exploitable per final report, reflection accepted)[/green]")
+                        else:
+                            verdict = "false_positive"
+                            console.print(f"[green]✓ Verdict: FALSE POSITIVE (not exploitable per final report, reflection accepted)[/green]")
+                    else:
+                        console.print(f"[yellow]⚠ Final report missing is_exploitable field - checking FP check[/yellow]")
+                        # Fall through to FP check
+                    # Extract exploitability level
+                    if hasattr(final_report, 'is_exploitable'):
+                        exploitability = "exploitable" if final_report.is_exploitable else "not_exploitable"
+                    # Extract priority
+                    if hasattr(final_report, 'priority'):
+                        priority = final_report.priority
+                else:
+                    console.print(f"[yellow]⚠ No final report available - checking FP check[/yellow]")
+            
+            # If reflection uncertain but we have confident FP check, trust the FP check
+            elif has_confident_fp_check and last_reflection.confidence_assessment != "contradictory":
+                verdict = "false_positive" if final_fp_check.is_false_positive else "true_positive"
+                console.print(f"[green]✓ Verdict from FP check (reflection uncertain but FP check confident): {verdict.upper()}[/green]")
+                if hasattr(final_fp_check, 'exploitability'):
+                    exploitability = final_fp_check.exploitability
+                if hasattr(final_fp_check, 'corrected_priority'):
+                    priority = final_fp_check.corrected_priority
+            
+            elif last_reflection.confidence_assessment == "contradictory":
+                # Even with contradictions, if FP check is confident, use it
+                if has_confident_fp_check:
+                    verdict = "false_positive" if final_fp_check.is_false_positive else "true_positive"
+                    console.print(f"[yellow]⚠ Reflection found contradictions, but FP check is confident: {verdict.upper()}[/yellow]")
+                    if hasattr(final_fp_check, 'exploitability'):
+                        exploitability = final_fp_check.exploitability
+                    if hasattr(final_fp_check, 'corrected_priority'):
+                        priority = final_fp_check.corrected_priority
+                else:
+                    verdict = "needs_review"
+                    console.print(f"[yellow]⚠ Verdict: NEEDS REVIEW (reflection found contradictions, no confident FP check)[/yellow]")
+            else:
+                # Reflection requested refinement - check if we have other confident signals
+                if has_confident_fp_check:
+                    verdict = "false_positive" if final_fp_check.is_false_positive else "true_positive"
+                    console.print(f"[green]✓ Verdict from FP check (reflection requested refinement but FP check confident): {verdict.upper()}[/green]")
+                    if hasattr(final_fp_check, 'exploitability'):
+                        exploitability = final_fp_check.exploitability
+                    if hasattr(final_fp_check, 'corrected_priority'):
+                        priority = final_fp_check.corrected_priority
+                else:
+                    console.print(f"[yellow]⚠ Reflection requested refinement and no confident FP check - defaulting to needs_review[/yellow]")
+        
+        # Then check false positive check results (if not already used above)
+        elif final_fp_check:
+            verdict = "false_positive" if final_fp_check.is_false_positive else "true_positive"
+            console.print(f"[green]✓ Verdict from FP check: {verdict.upper()}[/green]")
+            if hasattr(final_fp_check, 'exploitability'):
+                exploitability = final_fp_check.exploitability
+            if hasattr(final_fp_check, 'corrected_priority'):
+                priority = final_fp_check.corrected_priority
+        
+        # Finally fall back to final report
+        elif final_report:
+            if hasattr(final_report, 'is_exploitable'):
+                verdict = "true_positive" if final_report.is_exploitable else "false_positive"
+                console.print(f"[green]✓ Verdict from final report: {verdict.upper()}[/green]")
+                if hasattr(final_report, 'is_exploitable'):
+                    exploitability = "exploitable" if final_report.is_exploitable else "not_exploitable"
+                if hasattr(final_report, 'priority'):
+                    priority = final_report.priority
+            else:
+                console.print(f"[yellow]⚠ Final report missing is_exploitable field - defaulting to needs_review[/yellow]")
+        else:
+            console.print(f"[yellow]⚠ No analysis results available - defaulting to needs_review[/yellow]")
+        
+        console.print(f"[cyan]Final determination: {verdict.upper()}[/cyan]")
+        
         result = {
             "confidence_score": final_report.confidence if final_report else None,
-            "verdict": "false_positive" if (final_fp_check and final_fp_check.is_false_positive) else "true_positive",
+            "verdict": verdict,
+            "exploitability": exploitability,
+            "priority": priority,
             "code_matches": len(result_state.code_matches),
             "analysis_complete": result_state.current_phase in ["completed", "failed"]
         }
