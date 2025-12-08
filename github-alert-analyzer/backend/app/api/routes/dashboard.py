@@ -1,7 +1,7 @@
 """Dashboard API routes."""
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from app.core.database import get_db
 from app.models import Alert, Repository, AlertAnalysis
@@ -18,10 +18,10 @@ async def get_dashboard_stats(
     db: Session = Depends(get_db)
 ):
     """Get dashboard statistics for current user."""
-    # Get user's repository IDs
-    repo_ids = db.query(Repository.id).filter(
+    # Get user's repository IDs as a proper select subquery
+    repo_ids = select(Repository.id).filter(
         Repository.user_id == current_user.id
-    ).subquery()
+    ).scalar_subquery()
     
     # Total alerts
     total_alerts = db.query(func.count(Alert.id)).filter(

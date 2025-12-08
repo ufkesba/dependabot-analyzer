@@ -16,8 +16,8 @@ router = APIRouter(prefix="/analysis", tags=["Analysis"])
 
 class StartAnalysisRequest(BaseModel):
     """Request to start analysis."""
-    llm_provider: Optional[str] = "google"
-    llm_model: Optional[str] = "gemini-flash-latest"
+    llm_provider: Optional[str] = "anthropic"
+    llm_model: Optional[str] = "claude-haiku-4-5-20251001"
 
 
 class StartAnalysisResponse(BaseModel):

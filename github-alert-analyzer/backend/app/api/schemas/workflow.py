@@ -54,6 +54,8 @@ class AnalysisWorkflowResponse(AnalysisWorkflowBase):
     code_matches_found: int = 0
     error_message: Optional[str] = None
     error_details: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     

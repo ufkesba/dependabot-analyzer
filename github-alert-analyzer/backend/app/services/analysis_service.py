@@ -48,7 +48,9 @@ class AnalysisService:
                 alert_id=alert_id,
                 status="pending",
                 current_phase="initial",
-                started_at=datetime.now(timezone.utc)
+                started_at=datetime.now(timezone.utc),
+                llm_provider=llm_provider,
+                llm_model=llm_model
             )
             db.add(workflow)
             db.commit()
@@ -123,7 +125,15 @@ class AnalysisService:
             workflow.total_duration_seconds = (
                 workflow.completed_at - workflow.started_at
             ).total_seconds()
-            workflow.final_confidence_score = result.get("confidence_score")
+            
+            # Convert confidence string to numeric score
+            confidence_str = result.get("confidence_score")
+            if confidence_str:
+                confidence_map = {"high": 0.9, "medium": 0.6, "low": 0.3}
+                workflow.final_confidence_score = confidence_map.get(confidence_str.lower(), 0.5)
+            else:
+                workflow.final_confidence_score = None
+            
             workflow.final_verdict = result.get("verdict")
             db.commit()
             

@@ -53,8 +53,8 @@ export default function AlertDetailPage() {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify({
-          llm_provider: 'google',
-          llm_model: 'gemini-flash-latest'
+          llm_provider: 'anthropic',
+          llm_model: 'claude-haiku-4-5-20251001'
         }),
       });
 
@@ -223,30 +223,28 @@ export default function AlertDetailPage() {
           <h2 className="text-2xl font-bold">
             Agentic Analysis Workflows
           </h2>
-          {workflows.length === 0 && (
-            <div className="flex flex-col items-end gap-2">
-              <button
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handleStartAnalysis}
-                disabled={analyzing}
-              >
-                {analyzing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Starting Analysis...
-                  </>
-                ) : (
-                  <>
-                    <PlayCircle className="w-4 h-4" />
-                    Start Analysis
-                  </>
-                )}
-              </button>
-              {analysisError && (
-                <p className="text-sm text-red-600">{analysisError}</p>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleStartAnalysis}
+              disabled={analyzing}
+            >
+              {analyzing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Starting Analysis...
+                </>
+              ) : (
+                <>
+                  <PlayCircle className="w-4 h-4" />
+                  {workflows.length === 0 ? 'Start Analysis' : 'Start New Analysis'}
+                </>
               )}
-            </div>
-          )}
+            </button>
+            {analysisError && (
+              <p className="text-sm text-red-600">{analysisError}</p>
+            )}
+          </div>
         </div>
 
         {workflows.length === 0 ? (

@@ -90,6 +90,10 @@ class AnalysisWorkflow(Base):
     final_verdict: Mapped[str | None] = mapped_column(String(100), nullable=True)  # false_positive, true_positive, needs_review
     accumulated_context: Mapped[str | None] = mapped_column(Text, nullable=True)  # Context from retries
     
+    # LLM Configuration
+    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)  # anthropic, google, openai
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)  # Model identifier
+    
     # Error tracking
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error_details: Mapped[str | None] = mapped_column(Text, nullable=True)

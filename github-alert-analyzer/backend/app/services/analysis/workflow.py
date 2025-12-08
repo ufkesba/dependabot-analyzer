@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../..'))
 from src.orchestrator.workflow import DependabotAnalyzer
 from src.orchestrator.state import AnalysisState
 from app.models import Alert, AgentExecution
+from app.core.config import settings
 
 
 async def run_alert_analysis(
@@ -43,6 +44,21 @@ async def run_alert_analysis(
     repository = alert.repository
     repo_full_name = repository.full_name
     
+    # Set API key in environment based on provider
+    # The LLMClient uses os.getenv() so we need to set it in the environment
+    if llm_provider == 'anthropic':
+        api_key = settings.anthropic_api_key
+        if api_key:
+            os.environ['ANTHROPIC_API_KEY'] = api_key
+    elif llm_provider == 'google':
+        api_key = settings.google_api_key
+        if api_key:
+            os.environ['GOOGLE_API_KEY'] = api_key
+    elif llm_provider == 'openai':
+        api_key = settings.openai_api_key
+        if api_key:
+            os.environ['OPENAI_API_KEY'] = api_key
+    
     # Create the analyzer
     analyzer = DependabotAnalyzer(
         repo=repo_full_name,
@@ -52,16 +68,8 @@ async def run_alert_analysis(
         verbose=True
     )
     
-    # We need to convert the DB alert to a DependabotAlert
-    # For now, let's fetch it fresh from GitHub
-    alerts = analyzer.alert_fetcher.fetch_alerts()
-    
-    # Find the matching alert by number
-    target_alert = None
-    for a in alerts:
-        if a.alert_number == alert.github_alert_number:
-            target_alert = a
-            break
+    # Fetch the specific alert by ID from GitHub
+    target_alert = analyzer.alert_fetcher.get_alert_by_id(alert.github_alert_number)
     
     if not target_alert:
         raise ValueError(f"Alert #{alert.github_alert_number} not found in GitHub")
@@ -123,15 +131,122 @@ async def run_alert_analysis(
         
         # Log executions from the state
         for execution in result_state.execution_history:
+            # Build comprehensive output data from execution metadata
+            output_data = execution.metadata.copy() if execution.metadata else {}
+            
+            # Try to capture LLM model info for this specific agent
+            agent_llm_info = None
+            try:
+                if execution.agent_name == "deep_analyzer" and hasattr(analyzer.analyzer, 'llm'):
+                    agent_llm_info = {
+                        "provider": analyzer.analyzer.llm.provider,
+                        "model": analyzer.analyzer.llm.model
+                    }
+                elif execution.agent_name == "false_positive_checker" and hasattr(analyzer.false_positive_checker, 'llm'):
+                    agent_llm_info = {
+                        "provider": analyzer.false_positive_checker.llm.provider,
+                        "model": analyzer.false_positive_checker.llm.model
+                    }
+                elif execution.agent_name == "code_analyzer" and hasattr(analyzer.code_analyzer, 'llm_client'):
+                    agent_llm_info = {
+                        "provider": analyzer.code_analyzer.llm_client.provider,
+                        "model": analyzer.code_analyzer.llm_client.model
+                    }
+                elif execution.agent_name == "reflection_agent" and hasattr(analyzer.reflection_agent, 'llm'):
+                    agent_llm_info = {
+                        "provider": analyzer.reflection_agent.llm.provider,
+                        "model": analyzer.reflection_agent.llm.model
+                    }
+            except:
+                pass  # If we can't get LLM info, that's okay
+            
+            if agent_llm_info:
+                output_data["llm_model_used"] = agent_llm_info
+            
+            # Add structured summary based on agent type
+            if execution.agent_name == "deep_analyzer" and result_state.final_report:
+                report = result_state.final_report
+                output_data.update({
+                    "full_response": {
+                        "alert_number": report.alert_number,
+                        "package": report.package,
+                        "vulnerability_id": report.vulnerability_id,
+                        "is_exploitable": report.is_exploitable,
+                        "confidence": report.confidence,
+                        "reasoning": report.reasoning,
+                        "impact_assessment": report.impact_assessment,
+                        "code_paths_affected": report.code_paths_affected,
+                        "test_case": report.test_case,
+                        "recommended_action": report.recommended_action,
+                        "priority": report.priority
+                    }
+                })
+                output_summary = f"Exploitable: {report.is_exploitable} | Confidence: {report.confidence} | Priority: {report.priority}\n\n{report.reasoning}"
+            elif execution.agent_name == "false_positive_checker" and result_state.final_fp_check:
+                fp_check = result_state.final_fp_check
+                output_data.update({
+                    "full_response": {
+                        "is_false_positive": fp_check.is_false_positive,
+                        "confidence": fp_check.confidence,
+                        "reasoning": fp_check.reasoning,
+                        "corrected_priority": fp_check.corrected_priority,
+                        "corrected_exploitability": fp_check.corrected_exploitability
+                    }
+                })
+                output_summary = f"False Positive: {fp_check.is_false_positive} | Confidence: {fp_check.confidence}\n\n{fp_check.reasoning}"
+            elif execution.agent_name == "reflection_agent" and result_state.reflection_results:
+                # Get the latest reflection result
+                reflection = result_state.reflection_results[-1]
+                output_data.update({
+                    "full_response": {
+                        "needs_refinement": reflection.needs_refinement,
+                        "confidence_assessment": reflection.confidence_assessment,
+                        "detected_patterns": reflection.detected_patterns,
+                        "reasoning": reflection.reasoning,
+                        "suggested_focus_areas": reflection.suggested_focus_areas,
+                        "command": {
+                            "action": reflection.command.action,
+                            "reason": reflection.command.reason,
+                            "next_agent": reflection.command.next_agent,
+                            "confidence_boost": reflection.command.confidence_boost
+                        }
+                    }
+                })
+                output_summary = f"Refinement Needed: {reflection.needs_refinement} | Assessment: {reflection.confidence_assessment}\n\n{reflection.reasoning}"
+            elif execution.agent_name == "code_analyzer":
+                matches_found = len(result_state.code_matches) if result_state.code_matches else 0
+                output_data["matches_found"] = matches_found
+                if result_state.code_matches:
+                    output_data["full_response"] = {
+                        "code_matches": [
+                            {
+                                "file_path": match.file_path,
+                                "line_number": match.line_number,
+                                "code_snippet": match.code_snippet,
+                                "matched_pattern": match.matched_pattern,
+                                "context": match.context
+                            }
+                            for match in result_state.code_matches[:10]  # Limit to first 10 matches
+                        ]
+                    }
+                output_summary = f"Found {matches_found} code matches"
+            else:
+                output_summary = f"{execution.agent_name} execution"
+            
             tracker.log_execution(
                 agent_name=execution.agent_name,
                 phase=state.current_phase,
                 status="completed" if execution.success else "failed",
                 success=execution.success,
                 error_message=execution.error_message,
-                output_data=execution.metadata,
+                output_summary=output_summary,
+                output_data=output_data,
                 attempt_number=1
             )
+            
+            # Note: Individual agents may use different LLM models
+            # LLM model info is captured in the JSON conversation logs
+            # at logs/conversations/{agent_name}_{session_id}_{num}.json
         
         # Extract final results
         final_report = result_state.final_report
