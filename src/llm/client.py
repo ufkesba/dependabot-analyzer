@@ -7,6 +7,8 @@ from anthropic import Anthropic
 import google.generativeai as genai
 from pydantic import BaseModel
 
+from ..config.secrets import get_secret
+
 
 class LLMResponse(BaseModel):
     """Structured response from LLM"""
@@ -35,16 +37,16 @@ class LLMClient:
 
         # Configure provider
         if provider == "anthropic":
-            self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+            self.api_key = api_key or get_secret("ANTHROPIC_API_KEY")
             self.model = model or "claude-haiku-4-5-20251001"
             if not self.api_key:
-                raise ValueError(f"ANTHROPIC_API_KEY not found. Set it in your environment or .env file.")
+                raise ValueError(f"ANTHROPIC_API_KEY not found. Set it in your environment or .env file or Secret Manager.")
             self.client = Anthropic(api_key=self.api_key)
         elif provider == "google":
-            self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+            self.api_key = api_key or get_secret("GOOGLE_API_KEY")
             self.model = model or "gemini-flash-latest"
             if not self.api_key:
-                raise ValueError(f"GOOGLE_API_KEY not found. Set it in your environment or .env file.")
+                raise ValueError(f"GOOGLE_API_KEY not found. Set it in your environment or .env file or Secret Manager.")
             genai.configure(api_key=self.api_key)
             self.client = genai.GenerativeModel(self.model)
         else:

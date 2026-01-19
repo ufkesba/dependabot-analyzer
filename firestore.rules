@@ -1,0 +1,7 @@
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /analysis_reports/{report} {
+      allow read, write: if false; // Only allow access via Service Account/Cloud Functions
+    }
+  }
+}

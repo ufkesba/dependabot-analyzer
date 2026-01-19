@@ -28,3 +28,8 @@ httpx>=0.27.1
 
 # Utilities
 python-dotenv>=1.0.0
+
+# GCP and Firebase
+google-cloud-secret-manager>=2.20.0
+google-cloud-firestore>=2.14.0
+firebase-admin>=6.4.0
