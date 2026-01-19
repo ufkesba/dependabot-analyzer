@@ -45,7 +45,29 @@ Edit `.env` and add:
 - **GOOGLE_API_KEY**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
 - **GITHUB_TOKEN**: Create at [GitHub Settings](https://github.com/settings/tokens) (needs `repo` scope)
 
-### 3. Run Analysis
+### 3. GCP & Firebase Setup (Optional)
+
+This tool supports Google Cloud Platform and Firebase for secret management and storage.
+
+#### Secret Manager
+Store your API keys in GCP Secret Manager to avoid using `.env` files in production:
+- `GITHUB_TOKEN`
+- `GOOGLE_API_KEY`
+- `ANTHROPIC_API_KEY`
+
+#### Firestore Storage
+Save analysis reports directly to Firestore:
+```bash
+python main.py analyze owner/repo --storage firestore
+```
+
+#### Cloud Functions Deployment
+Deploy the analyzer as a Google Cloud Function:
+```bash
+./deploy.sh
+```
+
+### 4. Run Analysis
 
 ```bash
 python main.py analyze owner/repo-name
@@ -96,6 +118,7 @@ Options:
   --model, -m         LLM model [default: gemini-2.0-flash-exp]
   --provider, -p      LLM provider: google, anthropic, openai [default: google]
   --save/--no-save    Save reports to ./reports/ [default: save]
+  --storage           Storage type: file, firestore [default: file]
 ```
 
 ### Output

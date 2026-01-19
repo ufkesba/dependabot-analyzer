@@ -18,6 +18,8 @@ from rich.console import Console
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.orchestrator import DependabotAnalyzer
+from src.config.secrets import get_secret
+from src.storage import FileStorage, FirestoreStorage, NullStorage
 
 app = typer.Typer(help="Analyze Dependabot security alerts for exploitability")
 console = Console()
@@ -36,6 +38,7 @@ def analyze(
     model: str = typer.Option("claude-haiku-4-5-20251001", "--model", help="LLM model to use"),
     provider: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, google, openai"),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving analysis reports"),
+    storage_type: str = typer.Option("file", "--storage", help="Storage type: file, firestore"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed agent activity"),
 ):
     """
@@ -46,7 +49,7 @@ def analyze(
     """
     # Validate environment
     if not github_token:
-        github_token = os.getenv("GITHUB_TOKEN")
+        github_token = get_secret("GITHUB_TOKEN")
     if not github_token:
         console.print("[red]Error: GitHub token not found. Set GITHUB_TOKEN environment variable or use --github-token[/red]")
         raise typer.Exit(1)
@@ -58,18 +61,24 @@ def analyze(
     }
 
     required_key = api_key_env.get(provider)
-    if required_key and not os.getenv(required_key):
-        console.print(f"[red]Error: {required_key} environment variable not set[/red]")
+    if required_key and not get_secret(required_key):
+        console.print(f"[red]Error: {required_key} not found in environment or Secret Manager[/red]")
         raise typer.Exit(1)
 
     # Run analysis
     async def run_analysis():
+        if no_save:
+            storage = NullStorage()
+        else:
+            storage = FirestoreStorage() if storage_type == "firestore" else FileStorage()
+
         analyzer = DependabotAnalyzer(
             repo=repo,
             github_token=github_token,
             llm_model=model,
             llm_provider=provider,
-            verbose=verbose
+            verbose=verbose,
+            storage=storage
         )
 
         await analyzer.run(
@@ -78,8 +87,8 @@ def analyze(
             max_alerts=max_alerts
         )
 
-        if not no_save and analyzer.reports:
-            analyzer.save_reports()
+        # Reports are already saved during the run inside analyzer.run()
+        await analyzer.save_reports()
 
     asyncio.run(run_analysis())
 
@@ -92,6 +101,7 @@ def analyze_alert(
     model: str = typer.Option("claude-haiku-4-5-20251001", "--model", help="LLM model to use"),
     provider: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, google, openai"),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving analysis reports"),
+    storage_type: str = typer.Option("file", "--storage", help="Storage type: file, firestore"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed agent activity"),
 ):
     """
@@ -102,7 +112,7 @@ def analyze_alert(
     """
     # Validate environment
     if not github_token:
-        github_token = os.getenv("GITHUB_TOKEN")
+        github_token = get_secret("GITHUB_TOKEN")
     if not github_token:
         console.print("[red]Error: GitHub token not found. Set GITHUB_TOKEN environment variable or use --github-token[/red]")
         raise typer.Exit(1)
@@ -114,24 +124,30 @@ def analyze_alert(
     }
 
     required_key = api_key_env.get(provider)
-    if required_key and not os.getenv(required_key):
-        console.print(f"[red]Error: {required_key} environment variable not set[/red]")
+    if required_key and not get_secret(required_key):
+        console.print(f"[red]Error: {required_key} not found in environment or Secret Manager[/red]")
         raise typer.Exit(1)
 
     # Run analysis
     async def run_single_alert_analysis():
+        if no_save:
+            storage = NullStorage()
+        else:
+            storage = FirestoreStorage() if storage_type == "firestore" else FileStorage()
+
         analyzer = DependabotAnalyzer(
             repo=repo,
             github_token=github_token,
             llm_model=model,
             llm_provider=provider,
-            verbose=verbose
+            verbose=verbose,
+            storage=storage
         )
 
         await analyzer.run_single_alert(alert_id=alert_id)
 
-        if not no_save and analyzer.reports:
-            analyzer.save_reports()
+        # Reports are already saved during the run inside analyzer.run_single_alert()
+        await analyzer.save_reports()
 
     asyncio.run(run_single_alert_analysis())
 
