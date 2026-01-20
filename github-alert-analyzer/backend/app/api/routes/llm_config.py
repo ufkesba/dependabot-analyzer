@@ -1,10 +1,7 @@
 """LLM configuration API routes."""
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-
-from app.core.database import get_db
-from app.models import LLMConfiguration
+from app.services.models_service import llm_config_service, LLMConfigModel
 from app.api.schemas import LLMConfigCreate, LLMConfigResponse, LLMConfigUpdate
 from app.api.deps import CurrentUser
 
@@ -15,12 +12,9 @@ router = APIRouter(prefix="/llm-configs", tags=["LLM Configurations"])
 @router.get("", response_model=List[LLMConfigResponse])
 async def list_llm_configs(
     current_user: CurrentUser,
-    db: Session = Depends(get_db)
 ):
-    """List all LLM configurations for current user."""
-    configs = db.query(LLMConfiguration).filter(
-        LLMConfiguration.user_id == current_user.id
-    ).all()
+    """List all LLM configurations for current user from Firestore."""
+    configs = await llm_config_service.list(filters=[("user_id", "==", current_user.id)])
     return [LLMConfigResponse.model_validate(c) for c in configs]
 
 
@@ -28,28 +22,30 @@ async def list_llm_configs(
 async def create_llm_config(
     config_data: LLMConfigCreate,
     current_user: CurrentUser,
-    db: Session = Depends(get_db)
 ):
-    """Create a new LLM configuration."""
+    """Create a new LLM configuration in Firestore."""
     # If this is set as default, unset other defaults
     if config_data.is_default:
-        db.query(LLMConfiguration).filter(
-            LLMConfiguration.user_id == current_user.id,
-            LLMConfiguration.is_default == True
-        ).update({"is_default": False})
+        existing_defaults = await llm_config_service.list(filters=[
+            ("user_id", "==", current_user.id),
+            ("is_default", "==", True)
+        ])
+        for d in existing_defaults:
+            await llm_config_service.update(d.id, {"is_default": False})
     
-    config = LLMConfiguration(
+    from datetime import datetime, timezone
+    config = LLMConfigModel(
+        id="", # Firestore will generate
         user_id=current_user.id,
         provider=config_data.provider,
-        api_key=config_data.api_key,  # Should be encrypted in production
+        api_key=config_data.api_key,
         model_name=config_data.model_name,
         max_tokens=config_data.max_tokens,
         temperature=config_data.temperature,
         is_default=config_data.is_default,
+        created_at=datetime.now(timezone.utc)
     )
-    db.add(config)
-    db.commit()
-    db.refresh(config)
+    config = await llm_config_service.create(config)
     
     return LLMConfigResponse.model_validate(config)
 

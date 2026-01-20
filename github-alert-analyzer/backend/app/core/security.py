@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 import jwt
+from firebase_admin import auth
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
@@ -58,19 +59,28 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> TokenData | None:
-    """Decode and validate JWT access token."""
+    """Decode and validate JWT access token or Firebase ID token."""
+    # Try Firebase token first
     try:
-        payload = jwt.decode(
-            token,
-            settings.jwt_secret,
-            algorithms=[settings.algorithm]
+        decoded_token = auth.verify_id_token(token)
+        return TokenData(
+            user_id=decoded_token.get("uid"),
+            email=decoded_token.get("email")
         )
-        user_id: str = payload.get("sub")
-        email: str = payload.get("email")
-        
-        if user_id is None:
-            return None
+    except Exception:
+        # Fallback to internal JWT for backward compatibility or internal services
+        try:
+            payload = jwt.decode(
+                token,
+                settings.jwt_secret,
+                algorithms=[settings.algorithm]
+            )
+            user_id: str = payload.get("sub")
+            email: str = payload.get("email")
             
-        return TokenData(user_id=user_id, email=email)
-    except jwt.PyJWTError:
-        return None
+            if user_id is None:
+                return None
+
+            return TokenData(user_id=user_id, email=email)
+        except jwt.PyJWTError:
+            return None

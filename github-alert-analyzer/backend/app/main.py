@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.firebase import initialize_firebase
 from app.api import (
     auth_router,
     llm_config_router,
@@ -22,11 +22,10 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     try:
-        init_db()
-        print("✅ Database initialized successfully")
+        initialize_firebase()
+        print("✅ Firebase/Firestore initialized successfully")
     except Exception as e:
-        print(f"⚠️  Database connection failed: {e}")
-        print("🔧 Running without database - some features will be limited")
+        print(f"⚠️  Firebase initialization failed: {e}")
     yield
     # Shutdown
     pass

@@ -3,16 +3,13 @@ import httpx
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
-
-from app.core.database import get_db
+from app.services.user_service import user_service
 from app.core.config import settings
 from app.core.security import (
     verify_password,
     get_password_hash,
     create_access_token,
 )
-from app.models import User, OAuthConnection
 from app.api.schemas import UserCreate, UserLogin, UserResponse, TokenResponse
 from app.api.deps import CurrentUser
 
@@ -21,25 +18,21 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate, db: Session = Depends(get_db)):
+async def register(user_data: UserCreate):
     """Register a new user."""
     # Check if email already exists
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    existing_user = await user_service.get_by_email(user_data.email)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
     
-    # Create new user
-    user = User(
-        email=user_data.email,
-        password_hash=get_password_hash(user_data.password),
-        full_name=user_data.full_name,
+    # Create new user in Firestore
+    user = await user_service.create_user(
+        user_data,
+        get_password_hash(user_data.password)
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
     
     # Generate token
     access_token = create_access_token(
@@ -53,9 +46,9 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(credentials: UserLogin, db: Session = Depends(get_db)):
+async def login(credentials: UserLogin):
     """Login with email and password."""
-    user = db.query(User).filter(User.email == credentials.email).first()
+    user = await user_service.get_by_email(credentials.email)
     
     if not user or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(

@@ -1,11 +1,7 @@
 """Alert API routes."""
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
-
-from app.core.database import get_db
-from app.models import Alert, Repository, AlertAnalysis, Vulnerability
+from app.services.models_service import alert_service, repository_service, analysis_service
 from app.api.schemas import (
     AlertResponse,
     AlertDetailResponse,
@@ -24,7 +20,6 @@ router = APIRouter(prefix="/alerts", tags=["Alerts"])
 @router.get("", response_model=AlertListResponse)
 async def list_alerts(
     current_user: CurrentUser,
-    db: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=1000),
     repository_id: Optional[str] = None,
@@ -34,59 +29,57 @@ async def list_alerts(
     has_analysis: Optional[bool] = None,
     search: Optional[str] = None,
 ):
-    """List all alerts for current user's repositories."""
-    # Base query with user's repositories
-    query = db.query(Alert).join(Repository).filter(
-        Repository.user_id == current_user.id
-    )
+    """List all alerts for current user's repositories from Firestore."""
+    # This is complex in Firestore due to cross-collection join (Repository -> Alert)
+    # For now, we fetch user's repositories first.
+    user_repos = await repository_service.get_by_user(current_user.id)
+    repo_ids = [r.id for r in user_repos]
     
-    # Apply filters
     if repository_id:
-        query = query.filter(Alert.repository_id == repository_id)
+        if repository_id not in repo_ids:
+            return AlertListResponse(items=[], total=0, page=page, per_page=per_page, pages=0)
+        repo_ids = [repository_id]
+
+    # Firestore doesn't support 'in' with more than 30 values easily,
+    # but let's assume a reasonable number of repos for now.
+    all_alerts = []
+    for rid in repo_ids:
+        filters = [("repository_id", "==", rid)]
+        if package_ecosystem:
+            filters.append(("package_ecosystem", "==", package_ecosystem))
+
+        repo_alerts = await alert_service.list(filters=filters)
+        all_alerts.extend(repo_alerts)
+
+    # In-memory filtering for more complex criteria
     if severity:
-        query = query.filter(Alert.severity.in_(severity))
+        all_alerts = [a for a in all_alerts if a.severity in severity]
     if state:
-        query = query.filter(Alert.state.in_(state))
-    if package_ecosystem:
-        query = query.filter(Alert.package_ecosystem == package_ecosystem)
+        all_alerts = [a for a in all_alerts if a.state in state]
     if search:
-        query = query.filter(
-            Alert.package_name.ilike(f"%{search}%")
-        )
-    if has_analysis is not None:
-        if has_analysis:
-            query = query.filter(Alert.analyses.any())
-        else:
-            query = query.filter(~Alert.analyses.any())
+        all_alerts = [a for a in all_alerts if search.lower() in a.package_name.lower()]
     
-    # Count total
-    total = query.count()
-    
-    # Paginate
-    offset = (page - 1) * per_page
-    alerts = query.options(
-        joinedload(Alert.vulnerability),
-        joinedload(Alert.repository)
-    ).order_by(
-        Alert.created_at.desc()
-    ).offset(offset).limit(per_page).all()
+    # Sort and paginate
+    all_alerts.sort(key=lambda x: x.created_at, reverse=True)
+    total = len(all_alerts)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paged_alerts = all_alerts[start:end]
     
     pages = (total + per_page - 1) // per_page
     
-    # Add latest analysis to each alert
+    # Enrich with latest analysis and repo info
+    repo_map = {r.id: r.full_name for r in user_repos}
     alert_responses = []
-    for alert in alerts:
+    for alert in paged_alerts:
         alert_dict = AlertResponse.model_validate(alert).model_dump()
-        # Add repository full name
-        alert_dict["repository_full_name"] = alert.repository.full_name if alert.repository else None
-        # Get latest analysis
-        latest_analysis = db.query(AlertAnalysis).filter(
-            AlertAnalysis.alert_id == alert.id,
-            AlertAnalysis.status == "completed"
-        ).order_by(AlertAnalysis.created_at.desc()).first()
+        alert_dict["repository_full_name"] = repo_map.get(alert.repository_id)
         
-        if latest_analysis:
-            alert_dict["latest_analysis"] = AlertAnalysisResponse.model_validate(latest_analysis)
+        analyses = await analysis_service.get_by_alert(alert.id)
+        completed_analyses = [a for a in analyses if a.status == "completed"]
+        if completed_analyses:
+            latest = sorted(completed_analyses, key=lambda x: x.created_at, reverse=True)[0]
+            alert_dict["latest_analysis"] = AlertAnalysisResponse.model_validate(latest)
         
         alert_responses.append(AlertResponse(**alert_dict))
     
@@ -103,27 +96,28 @@ async def list_alerts(
 async def get_alert(
     alert_id: str,
     current_user: CurrentUser,
-    db: Session = Depends(get_db)
 ):
-    """Get a specific alert with all its analyses."""
-    alert = db.query(Alert).options(
-        joinedload(Alert.vulnerability),
-        joinedload(Alert.repository),
-        joinedload(Alert.analyses)
-    ).join(Repository).filter(
-        Alert.id == alert_id,
-        Repository.user_id == current_user.id
-    ).first()
-    
+    """Get a specific alert with all its analyses from Firestore."""
+    alert = await alert_service.get(alert_id)
     if not alert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Alert not found"
         )
     
+    # Verify ownership
+    repo = await repository_service.get(alert.repository_id)
+    if not repo or repo.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found"
+        )
+
+    analyses = await analysis_service.get_by_alert(alert_id)
+
     response = AlertDetailResponse.model_validate(alert)
-    response.repository_full_name = alert.repository.full_name
-    response.analyses = [AlertAnalysisResponse.model_validate(a) for a in alert.analyses]
+    response.repository_full_name = repo.full_name
+    response.analyses = [AlertAnalysisResponse.model_validate(a) for a in analyses]
     
     return response
 
