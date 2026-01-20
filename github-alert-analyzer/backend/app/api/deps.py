@@ -2,11 +2,8 @@
 from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
-
-from app.core.database import get_db
+from app.services.user_service import user_service
 from app.core.security import decode_access_token
-from app.models import User
 
 
 security = HTTPBearer()
@@ -14,9 +11,8 @@ security = HTTPBearer()
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    db: Session = Depends(get_db),
-) -> User:
-    """Get the current authenticated user from JWT token."""
+) -> Any:
+    """Get the current authenticated user from JWT token or Firebase token."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -29,9 +25,12 @@ async def get_current_user(
     if token_data is None or token_data.user_id is None:
         raise credentials_exception
     
-    user = db.query(User).filter(User.id == token_data.user_id).first()
+    user = await user_service.get(token_data.user_id)
     
     if user is None:
+        # If user doesn't exist in our Firestore but has a valid Firebase token,
+        # we might want to auto-create them or just fail.
+        # For now, we fail to ensure they go through registration.
         raise credentials_exception
     
     if not user.is_active:

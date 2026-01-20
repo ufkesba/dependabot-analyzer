@@ -6,45 +6,42 @@ import sys
 import os
 from datetime import datetime, timezone
 from typing import Dict, Any
-from sqlalchemy.orm import Session
 from rich.console import Console
+from app.services.models_service import alert_service, repository_service, execution_service, AgentExecutionModel, AlertModel
 
 # Add the parent directory to path to import existing analysis code
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../..'))
 
 from src.orchestrator.workflow import DependabotAnalyzer
 from src.orchestrator.state import AnalysisState
-from app.models import Alert, AgentExecution
 from app.core.config import settings
 
 console = Console()
 
 
 async def run_alert_analysis(
-    alert: Alert,
+    alert: AlertModel,
     workflow_id: str,
     github_token: str,
     llm_provider: str,
     llm_model: str,
-    db: Session
 ) -> Dict[str, Any]:
     """
-    Run analysis on an alert and track execution in database.
+    Run analysis on an alert and track execution in Firestore.
     
     Args:
-        alert: The Alert model instance
+        alert: The AlertModel instance
         workflow_id: ID of the AnalysisWorkflow being tracked
         github_token: GitHub API token
         llm_provider: LLM provider (google, anthropic, openai)
         llm_model: LLM model name
-        db: Database session
         
     Returns:
         Dict with analysis results
     """
     
     # Get repository info
-    repository = alert.repository
+    repository = await repository_service.get(alert.repository_id)
     repo_full_name = repository.full_name
     
     # Set API key in environment based on provider
@@ -80,14 +77,13 @@ async def run_alert_analysis(
     # Create initial state
     state = AnalysisState(alert=target_alert)
     
-    # Create a tracking wrapper that logs to database
-    class DatabaseTracker:
-        def __init__(self, workflow_id: str, db: Session):
+    # Create a tracking wrapper that logs to Firestore
+    class FirestoreTracker:
+        def __init__(self, workflow_id: str):
             self.workflow_id = workflow_id
-            self.db = db
             self.execution_order = 0
         
-        def log_execution(
+        async def log_execution(
             self,
             agent_name: str,
             phase: str,
@@ -99,10 +95,11 @@ async def run_alert_analysis(
             duration_seconds: float = None,
             attempt_number: int = 1
         ):
-            """Log an agent execution to database."""
+            """Log an agent execution to Firestore."""
             self.execution_order += 1
             
-            execution = AgentExecution(
+            execution = AgentExecutionModel(
+                id="", # Firestore will generate
                 analysis_workflow_id=self.workflow_id,
                 agent_name=agent_name,
                 execution_order=self.execution_order,
@@ -115,14 +112,13 @@ async def run_alert_analysis(
                 duration_seconds=duration_seconds,
                 attempt_number=attempt_number,
                 started_at=datetime.now(timezone.utc),
-                completed_at=datetime.now(timezone.utc) if status == "completed" else None
+                completed_at=datetime.now(timezone.utc) if status == "completed" else None,
+                created_at=datetime.now(timezone.utc)
             )
             
-            self.db.add(execution)
-            self.db.commit()
-            return execution
+            return await execution_service.create(execution)
     
-    tracker = DatabaseTracker(workflow_id, db)
+    tracker = FirestoreTracker(workflow_id)
     
     # Run the analysis with tracking
     # This is a simplified version - you'll want to integrate more deeply
@@ -236,7 +232,7 @@ async def run_alert_analysis(
             else:
                 output_summary = f"{execution.agent_name} execution"
             
-            tracker.log_execution(
+            await tracker.log_execution(
                 agent_name=execution.agent_name,
                 phase=state.current_phase,
                 status="completed" if execution.success else "failed",
@@ -393,25 +389,24 @@ async def run_alert_analysis(
         }
         
         # Update workflow counters
-        from app.models import AnalysisWorkflow
-        workflow = db.query(AnalysisWorkflow).filter(
-            AnalysisWorkflow.id == workflow_id
-        ).first()
+        from app.services.models_service import workflow_service
+        workflow = await workflow_service.get(workflow_id)
         
         if workflow:
-            workflow.total_agents_executed = len(result_state.execution_history)
-            workflow.successful_executions = sum(1 for e in result_state.execution_history if e.success)
-            workflow.failed_executions = sum(1 for e in result_state.execution_history if not e.success)
-            workflow.code_matches_found = len(result_state.code_matches)
-            workflow.current_phase = result_state.current_phase
-            workflow.final_summary = final_summary
-            db.commit()
+            await workflow_service.update(workflow_id, {
+                "total_agents_executed": len(result_state.execution_history),
+                "successful_executions": sum(1 for e in result_state.execution_history if e.success),
+                "failed_executions": sum(1 for e in result_state.execution_history if not e.success),
+                "code_matches_found": len(result_state.code_matches),
+                "current_phase": result_state.current_phase,
+                "final_summary": final_summary
+            })
         
         return result
         
     except Exception as e:
         # Log failure
-        tracker.log_execution(
+        await tracker.log_execution(
             agent_name="workflow",
             phase="failed",
             status="failed",

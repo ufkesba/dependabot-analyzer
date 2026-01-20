@@ -4,11 +4,7 @@ import httpx
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-
-from app.core.database import get_db
-from app.models import Repository, Alert, OAuthConnection, Vulnerability
+from app.services.models_service import repository_service, alert_service
 from app.api.schemas import (
     RepositoryResponse,
     RepositoryUpdate,
@@ -24,32 +20,31 @@ router = APIRouter(prefix="/repositories", tags=["Repositories"])
 @router.get("", response_model=RepositoryListResponse)
 async def list_repositories(
     current_user: CurrentUser,
-    db: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
     is_monitored: Optional[bool] = None,
 ):
-    """List all repositories for current user."""
-    query = db.query(Repository).filter(Repository.user_id == current_user.id)
-    
-    # Apply filters
-    if search:
-        query = query.filter(Repository.full_name.ilike(f"%{search}%"))
+    """List all repositories for current user from Firestore."""
+    filters = [("user_id", "==", current_user.id)]
     if is_monitored is not None:
-        query = query.filter(Repository.is_monitored == is_monitored)
+        filters.append(("is_monitored", "==", is_monitored))
     
-    # Count total
-    total = query.count()
+    repositories = await repository_service.list(filters=filters, limit=page*per_page)
+
+    # Filtering and pagination in-memory for now (Firestore has limited search)
+    if search:
+        repositories = [r for r in repositories if search.lower() in r.full_name.lower()]
     
-    # Paginate
-    offset = (page - 1) * per_page
-    repositories = query.order_by(Repository.full_name).offset(offset).limit(per_page).all()
+    total = len(repositories)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paged_repos = repositories[start:end]
     
     pages = (total + per_page - 1) // per_page
     
     return RepositoryListResponse(
-        items=[RepositoryResponse.model_validate(r) for r in repositories],
+        items=[RepositoryResponse.model_validate(r) for r in paged_repos],
         total=total,
         page=page,
         per_page=per_page,

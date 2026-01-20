@@ -5,10 +5,7 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 
 # Database
-sqlalchemy==2.0.36
-alembic==1.14.0
-psycopg2-binary==2.9.10
-asyncpg==0.30.0
+# Migrated to Firestore
 
 # Authentication & Security
 pyjwt[crypto]==2.10.1
@@ -25,6 +22,10 @@ pydantic==2.10.3
 pydantic-settings==2.6.1
 email-validator==2.2.0
 
+# Firebase & GCP
+firebase-admin==6.6.0
+google-cloud-firestore==2.19.0
+google-cloud-secret-manager==2.22.0
 
 # LLM Providers
 anthropic==0.40.0

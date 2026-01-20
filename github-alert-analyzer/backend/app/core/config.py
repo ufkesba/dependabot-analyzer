@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = True
     
-    # Database (Supabase)
-    database_url: str = "postgresql://postgres:password@db.project.supabase.co:5432/postgres"
-    database_echo: bool = False
+    # Database (Firebase/GCP)
+    gcp_project_id: str = ""
+    firebase_service_account_path: str = ""  # For local development
     
     # Security
     secret_key: str = "dev-secret-key-change-in-production"

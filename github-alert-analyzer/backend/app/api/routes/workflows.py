@@ -2,13 +2,10 @@
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from app.services.models_service import workflow_service, alert_service, repository_service, execution_service
 from collections import defaultdict
 from pydantic import BaseModel
 
-from app.core.database import get_db
-from app.models import Alert, Repository, AnalysisWorkflow, AgentExecution
 from app.api.schemas import (
     AnalysisWorkflowResponse,
     AnalysisWorkflowDetailResponse,
@@ -32,30 +29,27 @@ class UpdateWorkflowStatusRequest(BaseModel):
 async def get_workflow(
     workflow_id: str,
     current_user: CurrentUser,
-    db: Session = Depends(get_db),
 ):
-    """Get detailed workflow information including all agent executions."""
-    workflow = (
-        db.query(AnalysisWorkflow)
-        .join(Alert)
-        .join(Repository)
-        .filter(
-            AnalysisWorkflow.id == workflow_id,
-            Repository.user_id == current_user.id
-        )
-        .options(
-            joinedload(AnalysisWorkflow.agent_executions)
-        )
-        .first()
-    )
-    
+    """Get detailed workflow information including all agent executions from Firestore."""
+    workflow = await workflow_service.get(workflow_id)
     if not workflow:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Workflow not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
     
-    return workflow
+    alert = await alert_service.get(workflow.alert_id)
+    if not alert:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+
+    repo = await repository_service.get(alert.repository_id)
+    if not repo or repo.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+
+    executions = await execution_service.get_by_workflow(workflow_id)
+
+    # Manually build the detail response since we can't use joinedload
+    workflow_dict = workflow.model_dump()
+    workflow_dict["agent_executions"] = [e.model_dump() for e in executions]
+
+    return AnalysisWorkflowDetailResponse.model_validate(workflow_dict)
 
 
 @router.get("/{workflow_id}/summary", response_model=WorkflowSummary)
