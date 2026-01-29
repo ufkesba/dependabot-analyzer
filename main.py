@@ -33,6 +33,7 @@ def analyze(
     state: str = typer.Option("open", "--state", help="Alert state: open, fixed, dismissed, or all"),
     min_severity: Optional[str] = typer.Option("medium", "--min-severity", help="Minimum severity: critical, high, medium, low"),
     max_alerts: Optional[int] = typer.Option(None, "--max-alerts", help="Maximum number of alerts to analyze"),
+    max_files: int = typer.Option(150, "--max-files", help="Maximum files to scan per alert (for large repos)"),
     model: str = typer.Option("claude-haiku-4-5-20251001", "--model", help="LLM model to use"),
     provider: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, google, openai"),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving analysis reports"),
@@ -69,7 +70,8 @@ def analyze(
             github_token=github_token,
             llm_model=model,
             llm_provider=provider,
-            verbose=verbose
+            verbose=verbose,
+            max_files=max_files
         )
 
         await analyzer.run(
@@ -89,6 +91,7 @@ def analyze_alert(
     repo: str = typer.Argument(..., help="GitHub repository (format: owner/repo)"),
     alert_id: int = typer.Argument(..., help="Dependabot alert number to analyze"),
     github_token: Optional[str] = typer.Option(None, "--github-token", help="GitHub personal access token"),
+    max_files: int = typer.Option(150, "--max-files", help="Maximum files to scan (for large repos)"),
     model: str = typer.Option("claude-haiku-4-5-20251001", "--model", help="LLM model to use"),
     provider: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, google, openai"),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving analysis reports"),
@@ -125,7 +128,8 @@ def analyze_alert(
             github_token=github_token,
             llm_model=model,
             llm_provider=provider,
-            verbose=verbose
+            verbose=verbose,
+            max_files=max_files
         )
 
         await analyzer.run_single_alert(alert_id=alert_id)

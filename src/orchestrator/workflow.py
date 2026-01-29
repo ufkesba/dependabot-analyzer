@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-from ..agents.alert_fetcher import AlertFetcher, DependabotAlert
+from ..agents.alert_fetcher import AlertFetcher, DependabotAlert, get_search_scope_from_manifest, MonorepoInfo
 from ..agents.deep_analyzer import DeepAnalyzer, AnalysisReport
 from ..agents.code_analyzer import CodeAnalyzer, CodeMatch
 from ..agents.false_positive_checker import FalsePositiveChecker, FalsePositiveCheck
@@ -27,7 +27,8 @@ class DependabotAnalyzer:
         github_token: Optional[str] = None,
         llm_model: str = "gemini-flash-latest",
         llm_provider: str = "google",
-        verbose: bool = False
+        verbose: bool = False,
+        max_files: int = 150
     ):
         """
         Args:
@@ -36,24 +37,55 @@ class DependabotAnalyzer:
             llm_model: LLM model to use for analysis
             llm_provider: LLM provider (google, anthropic, openai)
             verbose: Show detailed agent activity
+            max_files: Maximum files to scan per alert (default 150)
         """
         self.repo = repo
         self.verbose = verbose
+        self.max_files = max_files
 
-        # Initialize components
+        # Initialize components (code_analyzer created per-alert with proper scope)
         self.alert_fetcher = AlertFetcher(repo, github_token)
+        self.llm_provider = llm_provider
+        self.llm_model = llm_model
+
         deep_analyzer_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="deep_analyzer")
         false_positive_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="false_positive_checker")
-        code_analyzer_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="code_analyzer")
         reflection_llm = LLMClient(provider=llm_provider, model=llm_model, agent_name="reflection_agent")
+
         self.analyzer = DeepAnalyzer(deep_analyzer_llm, verbose=verbose)
-        self.code_analyzer = CodeAnalyzer(self.alert_fetcher.repo, llm_client=code_analyzer_llm, verbose=verbose)
         self.false_positive_checker = FalsePositiveChecker(false_positive_llm, verbose=verbose)
         self.reflection_agent = ReflectionAgent(reflection_llm, verbose=verbose)
 
         self.reports: List[AnalysisReport] = []
         self.false_positive_checks: List[FalsePositiveCheck] = []
         self.analysis_states: List[AnalysisState] = []  # Track state for each alert
+        self.monorepo_info: Optional[MonorepoInfo] = None  # Cached monorepo detection
+
+    def _create_scoped_code_analyzer(self, alert: DependabotAlert) -> CodeAnalyzer:
+        """
+        Create a CodeAnalyzer scoped to the alert's manifest directory.
+
+        For monorepos, this ensures we only search within the relevant
+        service/package directory.
+        """
+        search_scope = get_search_scope_from_manifest(alert.manifest_path)
+
+        if self.verbose and search_scope:
+            console.print(f"[cyan]Scoping code analysis to: {search_scope}/[/cyan]")
+
+        code_analyzer_llm = LLMClient(
+            provider=self.llm_provider,
+            model=self.llm_model,
+            agent_name="code_analyzer"
+        )
+
+        return CodeAnalyzer(
+            self.alert_fetcher.repo,
+            llm_client=code_analyzer_llm,
+            verbose=self.verbose,
+            search_scope=search_scope,
+            max_files=self.max_files
+        )
 
     async def _process_alert_with_state(self, state: AnalysisState) -> AnalysisState:
         """
@@ -68,6 +100,10 @@ class DependabotAnalyzer:
         """
         alert = state.alert
 
+        # Create a scoped code analyzer for this specific alert
+        # This ensures monorepo alerts only search within their service directory
+        code_analyzer = self._create_scoped_code_analyzer(alert)
+
         # Phase 1: Code Analysis
         state.current_phase = "code_analysis"
         state.increment_attempts("code_analyzer")
@@ -77,7 +113,7 @@ class DependabotAnalyzer:
 
         try:
 
-            code_matches = await self.code_analyzer.find_vulnerable_usage(
+            code_matches = await code_analyzer.find_vulnerable_usage(
                 package_name=alert.package,
                 vulnerability_id=alert.vulnerability_id,
                 max_files=50,
@@ -286,6 +322,11 @@ class DependabotAnalyzer:
             border_style="cyan"
         ))
 
+        # Detect monorepo configuration
+        self.monorepo_info = self.alert_fetcher.detect_monorepo()
+        if self.monorepo_info.is_monorepo:
+            console.print(f"[dim]Monorepo mode enabled - searches will be scoped to manifest directories[/dim]\n")
+
         # Step 1: Fetch alerts
         severity_filter = self._get_severity_filter(min_severity) if min_severity else None
         alerts = self.alert_fetcher.get_alerts(state=state, severity=severity_filter)
@@ -339,6 +380,11 @@ class DependabotAnalyzer:
             f"Alert ID: {alert_id}",
             border_style="cyan"
         ))
+
+        # Detect monorepo configuration
+        self.monorepo_info = self.alert_fetcher.detect_monorepo()
+        if self.monorepo_info.is_monorepo:
+            console.print(f"[dim]Monorepo mode enabled - searches will be scoped to manifest directories[/dim]\n")
 
         # Fetch the specific alert directly
         target_alert = self.alert_fetcher.get_alert_by_id(alert_id)

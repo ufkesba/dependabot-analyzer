@@ -43,6 +43,22 @@ class CodeAnalyzer:
     Analyzes code to find actual vulnerable function usage patterns.
     """
 
+    # Directories to skip during code search
+    SKIP_DIRS = {
+        'test', 'tests', '__tests__', '__mocks__', 'fixtures', 'e2e',
+        'node_modules', 'venv', '.venv', 'env', '.env',
+        'dist', 'build', 'out', '.next', '.nuxt',
+        '.git', 'coverage', '.nyc_output',
+        'vendor', 'third_party', 'external',
+    }
+
+    # File patterns that indicate test files
+    TEST_FILE_PATTERNS = [
+        '.test.', '.spec.', '_test.', '_spec.',
+        '.tests.', '.specs.',
+        'test_', 'spec_',
+    ]
+
     # Known vulnerability patterns for common packages
     VULNERABILITY_PATTERNS = {
         "axios": {
@@ -139,10 +155,34 @@ class CodeAnalyzer:
         }
     }
 
-    def __init__(self, repo: Repository.Repository, llm_client: Optional['LLMClient'] = None, verbose: bool = False):
+    def __init__(
+        self,
+        repo: Repository.Repository,
+        llm_client: Optional['LLMClient'] = None,
+        verbose: bool = False,
+        search_scope: str = "",
+        max_files: int = 150
+    ):
+        """
+        Initialize the CodeAnalyzer.
+
+        Args:
+            repo: GitHub repository object
+            llm_client: Optional LLM client for dynamic pattern extraction
+            verbose: Enable verbose output
+            search_scope: Directory path to scope searches (e.g., "services/serviceB").
+                         Derived from manifest_path for monorepo support.
+                         Empty string means search entire repo.
+            max_files: Maximum number of files to scan (default 150)
+        """
         self.repo = repo
         self.llm = llm_client  # Optional LLM for dynamic pattern extraction
         self.verbose = verbose
+        self.search_scope = search_scope.rstrip('/') if search_scope else ""
+        self.default_max_files = max_files
+
+        if self.verbose and self.search_scope:
+            console.print(f"[cyan]Code search scoped to: {self.search_scope}/[/cyan]")
 
     async def fetch_package_documentation(self, package_name: str) -> Optional[str]:
         """
@@ -512,7 +552,7 @@ Respond in JSON format with these fields:
         self,
         package_name: str,
         vulnerability_id: str,
-        max_files: int = 50,
+        max_files: Optional[int] = None,
         vulnerability_description: Optional[str] = None,
         vulnerability_summary: Optional[str] = None
     ) -> List[CodeMatch]:
@@ -522,15 +562,20 @@ Respond in JSON format with these fields:
         Args:
             package_name: Name of the vulnerable package
             vulnerability_id: The vulnerability ID (GHSA, CVE, etc.)
-            max_files: Maximum number of files to scan
+            max_files: Maximum number of files to scan (uses default_max_files if not specified)
             vulnerability_description: Full vulnerability description (for LLM extraction)
             vulnerability_summary: Short vulnerability summary (for LLM extraction)
 
         Returns:
             List of CodeMatch objects showing vulnerable usage
         """
+        # Use instance default if not specified
+        if max_files is None:
+            max_files = self.default_max_files
+
         if self.verbose:
-            console.print(f"[cyan]Searching for vulnerable usage of {package_name}...[/cyan]")
+            scope_msg = f" in {self.search_scope}/" if self.search_scope else ""
+            console.print(f"[cyan]Searching for vulnerable usage of {package_name}{scope_msg}...[/cyan]")
 
         # Get vulnerability pattern if we have it (fast path)
         pattern = self._get_vulnerability_pattern(package_name, vulnerability_id)
@@ -694,6 +739,30 @@ Respond in JSON format with these fields:
 
         return matches
 
+    def _is_test_file(self, file_path: str) -> bool:
+        """
+        Check if a file path indicates a test file.
+
+        Handles patterns like:
+        - *.test.ts, *.spec.js
+        - test_*.py, spec_*.rb
+        - Files in test directories
+        """
+        file_lower = file_path.lower()
+
+        # Check for test file naming patterns
+        for pattern in self.TEST_FILE_PATTERNS:
+            if pattern in file_lower:
+                return True
+
+        # Check if file is in a test-related directory
+        path_parts = file_path.split('/')
+        for part in path_parts[:-1]:  # Check directories, not filename
+            if part.lower() in self.SKIP_DIRS:
+                return True
+
+        return False
+
     def _is_test_or_comment(self, line: str) -> bool:
         """Check if line is a test, comment, or non-production code"""
         line_lower = line.lower().strip()
@@ -702,34 +771,71 @@ Respond in JSON format with these fields:
         if line_lower.startswith('//') or line_lower.startswith('#'):
             return True
 
-        # Check for test patterns
+        # Check for test patterns in the line content
         test_indicators = [
             'test(',
             'describe(',
             'it(',
             'expect(',
+            'assert.',
+            'jest.',
+            'mocha.',
+            'chai.',
+            'sinon.',
+            'pytest.',
+            'unittest.',
             'curl ',
             'echo ',
             '// test',
             '# test',
+            '@test',
+            '@pytest',
         ]
 
         return any(indicator in line_lower for indicator in test_indicators)
 
-    def _get_code_files(self, max_files: int = 50):
-        """Get code files from repository"""
+    def _get_code_files(self, max_files: int = 150):
+        """
+        Get code files from repository, scoped to search_scope directory.
+
+        For monorepos, this ensures we only search within the relevant
+        service/package directory based on the manifest_path.
+        """
         files_to_search = []
 
         try:
-            contents = self.repo.get_contents("")
+            # Start from scoped directory or repo root
+            start_path = self.search_scope if self.search_scope else ""
+
+            if self.verbose and start_path:
+                console.print(f"[dim]→ Searching files in: {start_path}/[/dim]")
+
+            contents = self.repo.get_contents(start_path)
+
+            # Handle case where start_path is a single file (shouldn't happen, but be safe)
+            if not isinstance(contents, list):
+                contents = [contents]
+
             self._collect_files_recursive(contents, files_to_search, max_files)
+
+            if self.verbose:
+                console.print(f"[dim]→ Found {len(files_to_search)} code files to scan[/dim]")
+
         except Exception as e:
             console.print(f"[yellow]Warning: Error collecting files: {str(e)}[/yellow]")
+            # If scoped path fails, try falling back to root (with warning)
+            if self.search_scope:
+                console.print(f"[yellow]Falling back to root search...[/yellow]")
+                try:
+                    contents = self.repo.get_contents("")
+                    self._collect_files_recursive(contents, files_to_search, max_files)
+                except Exception as e2:
+                    console.print(f"[red]Root search also failed: {str(e2)}[/red]")
 
         return files_to_search
 
     def _collect_files_recursive(self, contents, files_list: List, max_files: int):
-        """Recursively collect code files"""
+        """Recursively collect code files, skipping test/build directories"""
         if len(files_list) >= max_files:
             return
 
@@ -737,13 +843,19 @@ Respond in JSON format with these fields:
             if len(files_list) >= max_files:
                 break
 
-            # Skip common directories that don't contain production code
-            skip_dirs = ['test', 'tests', '__tests__', 'node_modules', 'venv',
-                        'dist', 'build', '.git', 'coverage']
-            if any(skip in content.path for skip in skip_dirs):
-                continue
+            # Get the last path component for directory checking
+            path_parts = content.path.split('/')
+            current_name = path_parts[-1].lower() if path_parts else ""
 
+            # Skip directories that don't contain production code
             if content.type == "dir":
+                # Check if this directory name should be skipped
+                if current_name in self.SKIP_DIRS:
+                    continue
+                # Also skip if any parent path component is a skip dir
+                if any(part.lower() in self.SKIP_DIRS for part in path_parts):
+                    continue
+
                 try:
                     self._collect_files_recursive(
                         self.repo.get_contents(content.path),
@@ -752,7 +864,7 @@ Respond in JSON format with these fields:
                     )
                 except:
                     pass
-            elif self._is_code_file(content.name):
+            elif self._is_code_file(content.name) and not self._is_test_file(content.path):
                 files_list.append(content)
 
     def _is_code_file(self, filename: str) -> bool:
