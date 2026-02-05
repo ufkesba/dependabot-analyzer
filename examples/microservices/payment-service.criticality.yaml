@@ -1,0 +1,38 @@
+# Example criticality configuration for a payment processing service
+service_name: "payment-service"
+
+# Overall criticality level (low, medium, high, critical)
+criticality_level: critical
+
+# Highest classification of data this service handles
+# Options: public, internal, confidential, pii, phi, financial
+data_classification: financial
+
+# How the service is exposed
+# Options: internal, external, public
+exposure: external
+
+# Impact on business operations if service fails
+# Options: minimal, moderate, significant, critical
+business_impact: critical
+
+# Whether service directly serves end users
+user_facing: true
+
+# Compliance frameworks that apply
+compliance_requirements:
+  - PCI-DSS
+  - SOC2
+  - GDPR
+
+# Availability SLA
+sla_tier: "99.99%"
+
+# Other critical services this depends on
+critical_dependencies:
+  - auth-service
+  - fraud-detection-service
+  - notification-service
+
+# Human-readable description
+description: "Handles all payment processing, including credit card transactions, refunds, and payment method management. Critical path for revenue generation."

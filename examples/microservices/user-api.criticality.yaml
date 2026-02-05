@@ -1,0 +1,37 @@
+# Example criticality configuration for a user management API
+service_name: "user-api"
+
+# Overall criticality level (low, medium, high, critical)
+criticality_level: high
+
+# Highest classification of data this service handles
+# Options: public, internal, confidential, pii, phi, financial
+data_classification: pii
+
+# How the service is exposed
+# Options: internal, external, public
+exposure: external
+
+# Impact on business operations if service fails
+# Options: minimal, moderate, significant, critical
+business_impact: significant
+
+# Whether service directly serves end users
+user_facing: true
+
+# Compliance frameworks that apply
+compliance_requirements:
+  - GDPR
+  - CCPA
+  - SOC2
+
+# Availability SLA
+sla_tier: "99.9%"
+
+# Other critical services this depends on
+critical_dependencies:
+  - auth-service
+  - notification-service
+
+# Human-readable description
+description: "User management API handling profile data, preferences, and account settings. Contains personally identifiable information (PII)."

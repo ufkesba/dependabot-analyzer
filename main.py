@@ -38,12 +38,14 @@ def analyze(
     provider: str = typer.Option("anthropic", "--provider", help="LLM provider: anthropic, google, openai"),
     no_save: bool = typer.Option(False, "--no-save", help="Skip saving analysis reports"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed agent activity"),
+    repo_path: Optional[str] = typer.Option(None, "--repo-path", help="Local path to repository (for criticality config loading)"),
 ):
     """
     Analyze Dependabot security alerts in a GitHub repository.
 
     Example:
         python main.py analyze owner/repo --min-severity high --max-alerts 5
+        python main.py analyze owner/repo --repo-path /path/to/local/repo --verbose
     """
     # Validate environment
     if not github_token:
@@ -71,7 +73,8 @@ def analyze(
             llm_model=model,
             llm_provider=provider,
             verbose=verbose,
-            max_files=max_files
+            max_files=max_files,
+            repo_path=repo_path
         )
 
         await analyzer.run(
@@ -129,7 +132,8 @@ def analyze_alert(
             llm_model=model,
             llm_provider=provider,
             verbose=verbose,
-            max_files=max_files
+            max_files=max_files,
+            repo_path=repo_path
         )
 
         await analyzer.run_single_alert(alert_id=alert_id)

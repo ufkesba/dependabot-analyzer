@@ -10,6 +10,7 @@ from ..agents.alert_fetcher import DependabotAlert
 from ..agents.deep_analyzer import AnalysisReport
 from ..agents.code_analyzer import CodeMatch
 from ..agents.false_positive_checker import FalsePositiveCheck
+from ..models.criticality import CriticalityAssessment
 
 # Forward reference for ReflectionResult to avoid circular import
 from typing import TYPE_CHECKING
@@ -40,6 +41,7 @@ class AnalysisState(BaseModel):
     reports: List[AnalysisReport] = Field(default_factory=list)
     false_positive_checks: List[FalsePositiveCheck] = Field(default_factory=list)
     reflection_results: List[Any] = Field(default_factory=list)  # List[ReflectionResult] - using Any to avoid circular import
+    criticality_assessment: Optional[CriticalityAssessment] = None
 
     # Retry tracking
     code_analyzer_attempts: int = 0
@@ -54,7 +56,7 @@ class AnalysisState(BaseModel):
     accumulated_context: str = ""  # Context from previous failed attempts
 
     # Workflow state
-    current_phase: str = "initial"  # initial, code_analysis, deep_analysis, fp_check, completed, failed
+    current_phase: str = "initial"  # initial, code_analysis, deep_analysis, fp_check, criticality_check, completed, failed
     needs_retry: bool = False
     retry_reason: Optional[str] = None
 

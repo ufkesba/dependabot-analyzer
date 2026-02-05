@@ -1,0 +1,32 @@
+# Example criticality configuration for a documentation website
+service_name: "docs-site"
+
+# Overall criticality level (low, medium, high, critical)
+criticality_level: low
+
+# Highest classification of data this service handles
+# Options: public, internal, confidential, pii, phi, financial
+data_classification: public
+
+# How the service is exposed
+# Options: internal, external, public
+exposure: public
+
+# Impact on business operations if service fails
+# Options: minimal, moderate, significant, critical
+business_impact: minimal
+
+# Whether service directly serves end users
+user_facing: true
+
+# Compliance frameworks that apply
+compliance_requirements: []
+
+# Availability SLA
+sla_tier: "99.5%"
+
+# Other critical services this depends on
+critical_dependencies: []
+
+# Human-readable description
+description: "Public documentation website. Non-critical, read-only content. Downtime has minimal business impact."

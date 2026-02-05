@@ -9,18 +9,25 @@ AI-powered tool that analyzes Dependabot security alerts to determine actual exp
 - 🎯 Identifies false positives and non-exploitable vulnerabilities
 - 📊 Generates detailed reports with reasoning and test cases
 - 🚨 Prioritizes alerts based on actual risk
+- 🏢 **Service criticality assessment** for context-aware prioritization (microservices)
 
 ## Architecture
 
 ```
 Orchestrator
 ├─ Alert Fetcher (GitHub API)
-└─ Deep Analyzer (LLM-powered)
-    ├─ Usage analysis
-    ├─ Impact assessment
-    ├─ Exploitability check
-    └─ Test case generation
+├─ Code Analyzer (Pattern matching)
+├─ Deep Analyzer (LLM-powered)
+│   ├─ Usage analysis
+│   ├─ Impact assessment
+│   ├─ Exploitability check
+│   └─ Test case generation
+├─ Reflection Agent (Quality check)
+├─ False Positive Checker (Validation)
+└─ Criticality Agent (Service-aware prioritization)
 ```
+
+For microservices, add `.criticality.yaml` files to adjust priorities based on data sensitivity, exposure, and business impact. See [Criticality Agent Documentation](docs/CRITICALITY_AGENT.md).
 
 ## Quick Start
 
@@ -78,6 +85,24 @@ python main.py analyze myorg/myrepo --max-alerts 10
 
 ```bash
 # Analyze a specific alert by ID
+python main.py analyze-alert myorg/myrepo 42
+
+# With verbose output
+python main.py analyze-alert myorg/myrepo 42 --verbose
+```
+
+### Microservice Criticality Assessment
+
+For microservices/monorepos, add `.criticality.yaml` files to service directories to adjust priorities based on service context:
+
+```bash
+# Analyze with criticality assessment
+python main.py analyze myorg/myrepo \
+  --repo-path /path/to/local/repo \
+  --verbose
+```
+
+See [Criticality Agent Documentation](docs/CRITICALITY_AGENT.md) and [example configurations](examples/microservices/).
 python main.py analyze-alert myorg/myrepo 7
 
 # The alert ID is the number shown in GitHub's Dependabot alerts

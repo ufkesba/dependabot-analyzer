@@ -1,0 +1,34 @@
+# Example criticality configuration for an internal admin dashboard
+service_name: "internal-admin"
+
+# Overall criticality level (low, medium, high, critical)
+criticality_level: medium
+
+# Highest classification of data this service handles
+# Options: public, internal, confidential, pii, phi, financial
+data_classification: confidential
+
+# How the service is exposed
+# Options: internal, external, public
+exposure: internal
+
+# Impact on business operations if service fails
+# Options: minimal, moderate, significant, critical
+business_impact: moderate
+
+# Whether service directly serves end users
+user_facing: false
+
+# Compliance frameworks that apply
+compliance_requirements:
+  - SOC2
+
+# Availability SLA
+sla_tier: "99.5%"
+
+# Other critical services this depends on
+critical_dependencies:
+  - auth-service
+
+# Human-readable description
+description: "Internal admin dashboard for operations team. Used for monitoring and configuration. Not customer-facing."

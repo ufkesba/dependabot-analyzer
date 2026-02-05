@@ -9,6 +9,7 @@ from ..agents.deep_analyzer import DeepAnalyzer, AnalysisReport
 from ..agents.code_analyzer import CodeAnalyzer, CodeMatch
 from ..agents.false_positive_checker import FalsePositiveChecker, FalsePositiveCheck
 from ..agents.reflection_agent import ReflectionAgent, ReflectionResult
+from ..agents.criticality_agent import CriticalityAgent
 from ..llm.client import LLMClient
 from .state import AnalysisState
 
@@ -28,7 +29,8 @@ class DependabotAnalyzer:
         llm_model: str = "gemini-flash-latest",
         llm_provider: str = "google",
         verbose: bool = False,
-        max_files: int = 150
+        max_files: int = 150,
+        repo_path: Optional[str] = None
     ):
         """
         Args:
@@ -38,10 +40,12 @@ class DependabotAnalyzer:
             llm_provider: LLM provider (google, anthropic, openai)
             verbose: Show detailed agent activity
             max_files: Maximum files to scan per alert (default 150)
+            repo_path: Local path to repository (for criticality config loading)
         """
         self.repo = repo
         self.verbose = verbose
         self.max_files = max_files
+        self.repo_path = repo_path
 
         # Initialize components (code_analyzer created per-alert with proper scope)
         self.alert_fetcher = AlertFetcher(repo, github_token)
@@ -55,6 +59,7 @@ class DependabotAnalyzer:
         self.analyzer = DeepAnalyzer(deep_analyzer_llm, verbose=verbose)
         self.false_positive_checker = FalsePositiveChecker(false_positive_llm, verbose=verbose)
         self.reflection_agent = ReflectionAgent(reflection_llm, verbose=verbose)
+        self.criticality_agent = CriticalityAgent(repo_path=repo_path, verbose=verbose)
 
         self.reports: List[AnalysisReport] = []
         self.false_positive_checks: List[FalsePositiveCheck] = []
@@ -298,6 +303,33 @@ class DependabotAnalyzer:
                 state.add_execution("false_positive_checker", success=False, error_message=str(e))
                 if self.verbose:
                     console.print(f"[yellow]Warning: False positive check failed: {str(e)[:200]}[/yellow]")
+
+        # Phase 5: Criticality Assessment
+        if state.final_report:
+            if self.verbose:
+                console.print("\n[bold cyan]━━━ Phase 4: Criticality Assessment ━━━[/bold cyan]")
+
+            state.current_phase = "criticality_check"
+
+            try:
+                criticality_assessment = await self.criticality_agent.assess(
+                    manifest_path=alert.manifest_path,
+                    report=state.final_report,
+                    fp_check=state.final_fp_check
+                )
+
+                state.criticality_assessment = criticality_assessment
+                state.add_execution(
+                    "criticality_agent",
+                    success=True,
+                    adjusted_priority=criticality_assessment.adjusted_priority,
+                    risk_score=criticality_assessment.final_risk_score
+                )
+
+            except Exception as e:
+                state.add_execution("criticality_agent", success=False, error_message=str(e))
+                if self.verbose:
+                    console.print(f"[yellow]Warning: Criticality assessment failed: {str(e)[:200]}[/yellow]")
 
         state.current_phase = "completed"
         return state
