@@ -1,0 +1,113 @@
+CRITICALITY AGENT WORKFLOW
+==========================
+
+┌─────────────────────────────────────────────────────────────────┐
+│                  MICROSERVICE REPOSITORY                         │
+│                                                                  │
+│  microservices/                                                  │
+│  ├── payment-service/                                            │
+│  │   ├── .criticality.yaml    ← HIGH PRIORITY CONFIG            │
+│  │   ├── package.json         ← DEPENDABOT ALERT HERE           │
+│  │   └── src/                                                    │
+│  │                                                                │
+│  ├── docs-site/                                                  │
+│  │   ├── .criticality.yaml    ← LOW PRIORITY CONFIG             │
+│  │   ├── package.json                                            │
+│  │   └── src/                                                    │
+│  │                                                                │
+│  └── user-api/                                                   │
+│      ├── .criticality.yaml    ← MEDIUM PRIORITY CONFIG          │
+│      ├── package.json                                            │
+│      └── src/                                                    │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    ANALYSIS PIPELINE                             │
+│                                                                  │
+│  Phase 1: Code Pattern Search                                   │
+│  └─> Find vulnerable function usage in code                     │
+│                                                                  │
+│  Phase 2: Deep Analysis (with Reflection)                       │
+│  └─> LLM analyzes exploitability in code context                │
+│                                                                  │
+│  Phase 3: False Positive Check                                  │
+│  └─> Validate exploitable findings                              │
+│                                                                  │
+│  Phase 4: Criticality Assessment ← NEW!                         │
+│  └─> Adjust priority based on service context                   │
+│      ┌────────────────────────────────────┐                     │
+│      │ 1. Load .criticality.yaml          │                     │
+│      │ 2. Calculate risk multiplier       │                     │
+│      │ 3. Adjust priority                 │                     │
+│      │ 4. Generate recommendations        │                     │
+│      └────────────────────────────────────┘                     │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     FINAL REPORT                                 │
+│                                                                  │
+│  Alert: express XSS vulnerability in payment-service            │
+│  Original Priority: MEDIUM                                       │
+│  Adjusted Priority: CRITICAL ⬆                                  │
+│                                                                  │
+│  Risk Score: 10.0/10                                             │
+│  Multiplier: 3.0x (service criticality)                          │
+│                                                                  │
+│  Risk Factors:                                                   │
+│  • Externally accessible service                                │
+│  • Handles sensitive data (financial)                            │
+│  • Compliance requirements: PCI-DSS, SOC2                        │
+│  • High business impact (critical)                               │
+│                                                                  │
+│  Response Time: Immediate (compliance-driven)                    │
+└─────────────────────────────────────────────────────────────────┘
+
+
+EXAMPLE CONFIG (.criticality.yaml)
+===================================
+
+payment-service/.criticality.yaml:
+┌─────────────────────────────────────┐
+│ service_name: payment-service       │
+│ criticality_level: critical         │
+│ data_classification: financial      │
+│ exposure: external                  │
+│ business_impact: critical           │
+│ user_facing: true                   │
+│ compliance_requirements:            │
+│   - PCI-DSS                         │
+│   - SOC2                            │
+│ sla_tier: "99.99%"                  │
+└─────────────────────────────────────┘
+        │
+        ▼
+Risk Multiplier = 3.0x
+        │
+        ▼
+Medium Vuln (5.0) × 3.0x = 15.0 → 10.0 (clamped)
+        │
+        ▼
+Priority: CRITICAL
+
+
+docs-site/.criticality.yaml:
+┌─────────────────────────────────────┐
+│ service_name: docs-site             │
+│ criticality_level: low              │
+│ data_classification: public         │
+│ exposure: public                    │
+│ business_impact: minimal            │
+│ user_facing: true                   │
+│ compliance_requirements: []         │
+└─────────────────────────────────────┘
+        │
+        ▼
+Risk Multiplier = 1.4x
+        │
+        ▼
+Medium Vuln (5.0) × 1.4x = 7.0
+        │
+        ▼
+Priority: HIGH
